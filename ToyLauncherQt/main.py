@@ -424,17 +424,22 @@ class HmvSongPickerDialog(QDialog):
 
 
 class ModCompatibilityDialog(QDialog):
-    """Checks a source mods folder's character/bedroom packs against a TARGET game's custom-mod
+    """Converts ModRoom-era character/bedroom packs so they work on a TARGET game's custom-mod
     system (vanilla's single custom/ folder vs ModRoom's split custom_futas/custom_wives/
     custom_bedrooms folders - see GamePatcher.cs's CheckCustomModSystem and the module-level
     classify_custom_pack()/scan_source_mods_folder() above for why this is mostly a folder-
     restructuring problem, not a content-rewrite one). Always shows a dry-run report before
     copying anything, matching this app's existing confirm-before-mutate pattern (Patch Game/
-    Patch APK) - originals are never modified or moved, only copied."""
+    Patch APK) - originals are never modified or moved, only copied.
 
-    def __init__(self, parent: QWidget, gamepatcher_exe: Path, source_mods_root: Path) -> None:
+    The target defaults to the launcher's currently-configured game (the common case is "bring my
+    old ModRoom characters forward to the game I already have set up here") but can be pointed at
+    a different install via Browse."""
+
+    def __init__(self, parent: QWidget, gamepatcher_exe: Path, source_mods_root: Path,
+                 default_target_exe: str | None = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Mod Compatibility Checker")
+        self.setWindowTitle("ModRoom Character Converter")
         self.resize(560, 420)
 
         self._gamepatcher_exe = gamepatcher_exe
@@ -446,8 +451,9 @@ class ModCompatibilityDialog(QDialog):
         root = QVBoxLayout(self)
         root.addWidget(QLabel(
             f"Source mods folder: {source_mods_root}\n"
-            "Pick a target game below to check which of these packs would work there, and "
-            "optionally copy the portable ones into that game's expected folder layout."
+            "Converts ModRoom-style character/bedroom packs to work with the target game below - "
+            "checks which packs are portable, then copies the portable ones into the target's "
+            "expected folder layout (originals are never touched)."
         ))
 
         target_row = QHBoxLayout()
@@ -455,7 +461,7 @@ class ModCompatibilityDialog(QDialog):
         self._target_edit.setReadOnly(True)
         self._target_edit.setPlaceholderText("(no target game selected)")
         target_row.addWidget(self._target_edit, 1)
-        browse_btn = QPushButton("Browse for target game...")
+        browse_btn = QPushButton("Browse for a different target...")
         browse_btn.clicked.connect(self._browse_target)
         target_row.addWidget(browse_btn)
         root.addLayout(target_row)
@@ -466,7 +472,7 @@ class ModCompatibilityDialog(QDialog):
         root.addWidget(self._status_box, 1)
 
         button_row = QHBoxLayout()
-        self._convert_btn = QPushButton("Copy Portable Packs Into Target...")
+        self._convert_btn = QPushButton("Convert Portable Packs Into Target...")
         self._convert_btn.setEnabled(False)
         self._convert_btn.clicked.connect(self._convert_clicked)
         button_row.addWidget(self._convert_btn)
@@ -485,7 +491,14 @@ class ModCompatibilityDialog(QDialog):
             for c in self._classifications:
                 mark = "OK" if c.portable else "--"
                 self._log(f"  [{mark}] {c.name} ({c.kind}): {c.reason}")
-        self._log("\nPick a target game above to check compatibility against it.")
+
+        if default_target_exe and Path(default_target_exe).exists():
+            self._target_edit.setText(default_target_exe)
+            self._target_dir = Path(default_target_exe).resolve().parent
+            self._log(f"\nTarget defaulted to your configured game: {default_target_exe}")
+            self._check_target_compatibility(default_target_exe)
+        else:
+            self._log("\nPick a target game above to check compatibility against it.")
 
     def _log(self, message: str) -> None:
         self._status_box.append(message)
@@ -1183,11 +1196,11 @@ class MainWindow(QMainWindow):
         refresh_btn = QPushButton("Refresh")
         refresh_btn.clicked.connect(self._refresh_mods_tree)
         button_row.addWidget(refresh_btn)
-        compat_btn = QPushButton("Check Compatibility with Another Game...")
+        compat_btn = QPushButton("Convert ModRoom Characters to This Game...")
         compat_btn.setToolTip(
-            "Some custom character packs only work on ONE of vanilla Wife's Bedroom / ModRoom - "
-            "they use different mod systems. This checks which of your packs would work on a "
-            "different game install, and can copy the compatible ones into its expected layout."
+            "Old ModRoom character packs use a different folder layout than this game expects. "
+            "This checks which of your packs are portable and copies them into your configured "
+            "game's Custom folder, renaming files as needed so they actually load."
         )
         compat_btn.clicked.connect(self._check_mod_compatibility_clicked)
         button_row.addWidget(compat_btn)
@@ -1344,7 +1357,8 @@ class MainWindow(QMainWindow):
         mods_root = self._resolve_mods_path(prompt=True)
         if mods_root is None:
             return
-        dialog = ModCompatibilityDialog(self, self._patcher_exe, mods_root)
+        default_target = self._resolve_game_path(prompt=False)
+        dialog = ModCompatibilityDialog(self, self._patcher_exe, mods_root, default_target)
         dialog.exec()
 
     # --------------------------------------------------------- Android tab --

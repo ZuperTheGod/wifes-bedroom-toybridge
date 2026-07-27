@@ -1490,6 +1490,56 @@ rewrite. Built two pieces:
   none exist on this machine yet to test with.
 
 
+CORRECTION (2026-07-27): an earlier AI session this same day briefly, incorrectly told the user
+that this install (wifes_bedroom_win\) was "vanilla 1.1". That was wrong - it came from
+misreading ModRoom's own stale title-screen text ("VANILLA 1.1 + MODROOM V3", which only
+describes what ModRoom's build claims about ITS OWN base, not this install) as if it described
+this install directly. This install has been genuine v1.4 the whole time, confirmed two
+independent ways: (1) decompiled code already documented above in this file (enable_xray,
+func_get_custom_audio with moan_slow/moan_fast/orgasm folders, dual _alt sprite loading,
+880x512 room) matches the itch.io devlogs for v1.2 (room resolution) and v1.4 "Extra Polish
+Update" (the rest) specifically; (2) the user re-downloaded the game fresh from itch.io mid-
+session and its data.win was byte-identical to the one already on disk. No content changed as a
+result of this correction - it only corrects what an earlier response called the install's
+version, nothing about the install itself.
+
+MODROOM CHARACTER CONVERTER - reframed as its own real feature (2026-07-27): given the above
+correction and that the community has moved on from ModRoom V3.2, the user asked specifically
+for a polished, reusable "convert my old ModRoom characters to 1.4" tool - not further ModRoom
+V3.2 maintenance - and for it to ship as a real download from the GitHub repo, not just work
+locally. Changes:
+  - ToyLauncherQt\main.py: renamed the Mods-tab button from "Check Compatibility with Another
+    Game..." to "Convert ModRoom Characters to This Game...", and ModCompatibilityDialog now
+    defaults its target to the launcher's own configured Game: path automatically (still
+    overridable via "Browse for a different target...") instead of requiring a manual browse
+    every time - in practice the target is almost always "my current game". Underlying
+    classify/scan/convert logic (classify_custom_pack, scan_source_mods_folder,
+    EXPECTED_DATA_FILENAME rename handling) unchanged - this was a UX/framing change only.
+  - Rebuilt ToyLauncher.exe (onedir) and redeployed to wifes_bedroom_win\, buttplug-mod\, and
+    shareable\ (NOT ModRoom V3.2's install - intentionally left alone per the "no further
+    investment there" decision above). Also found installer\stage\GamePatcher.exe and
+    ApkPatcher.exe were stale (older than the root copies, left over from the --check-mod-system
+    work earlier this session) - refreshed those too before rebuilding the installer, and
+    confirmed byte-for-byte via direct comparison that every staged exe now matches its source.
+  - Rebuilt the Windows installer (ToyBridgeLauncher-Setup.exe via ISCC.exe) with the current
+    code.
+  - REAL end-to-end verification, not just "it built": ran the actual renamed conversion logic
+    (imported main.py's real functions directly, no GUI needed to exercise the same code path)
+    against ModRoom V3.2's full mods folder (24 packs) and copied all 19 remaining portable packs
+    (beyond heaven/Meru, already done) into the live wifes_bedroom_win install's custom\ folder -
+    zero failures, wife-extension renames applied correctly to the two wife packs among them.
+    Then launched the real wifes_bedroom.exe from a terminal with console output captured: all 21
+    packs (19 new + heaven + Meru) show "loading .../custom/<name>" with no "missing files"
+    warning; the only non-loading-confirmation lines were the same already-diagnosed harmless
+    "undefined" sprite-cache-lookup prints documented above, not a new issue.
+  - Added a top-level README.md (previously the repo had none) covering what this is, a link to
+    the GitHub Release for a ready-to-run download, and a section specifically on the character
+    converter. Added a matching short section to LAUNCHER.txt's MODS TAB writeup so the existing
+    end-user doc doesn't go stale next to the renamed button.
+  - Published a GitHub Release with ToyBridgeLauncher-Setup.exe attached as a binary asset (see
+    reference-github-repo memory / this file's git-hygiene notes - compiled binaries still never
+    go into the repo itself, only into a Release attachment).
+
 SHARING THIS MOD
 -------------------
 Do NOT share the patched data.win directly - it contains the entire

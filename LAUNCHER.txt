@@ -123,6 +123,14 @@ by hand next to the game.
      flat dialogue .json). Select a specific mod, not a category header.
   5. "Refresh" - re-scans the mods folder (useful if you added/removed
      something by hand outside the Launcher).
+  6. "Convert ModRoom Characters to This Game..." - brings ModRoom-era
+     character/bedroom packs forward to whatever game you have set under
+     "Game:" (Play tab). Scans your mods folder, reports which packs use
+     the simple, portable file convention vs. the older numbered one that
+     can't be moved without redrawing, then - after you confirm - copies
+     the portable ones into your current game's expected layout (renaming
+     the wife data file from .wife to .spouse automatically where needed).
+     Originals are never modified or moved, only copied.
 
 ANDROID TAB
 -------------
