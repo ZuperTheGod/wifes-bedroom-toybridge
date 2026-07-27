@@ -1,0 +1,120 @@
+LINUX / macOS SUPPORT
+=========================
+
+The GUI Launcher (ToyLauncher) is cross-platform now (Windows, Linux,
+macOS - built with Python/PySide6/Qt), so if you'd rather click through a
+window instead of using the command line, see LAUNCHER.txt - the same
+instructions apply on Linux/macOS, you just run the Linux/macOS copy of
+ToyLauncher instead of ToyLauncher.exe. A pre-built Linux copy is at
+cross-platform/linux-x64/ToyLauncher; there's no pre-built macOS copy (no
+Mac was available to build one on), but you can build it yourself from
+ToyLauncherQt/ (pip install -r requirements.txt, then pyinstaller --name
+ToyLauncher --onefile --windowed main.py).
+
+Everything below covers the command-line tools instead, in case you'd
+rather use those directly (or the Launcher isn't available yet for your
+platform):
+
+  GamePatcher       - patches your game's data file to enable toy support
+                       (same thing as the Launcher's "Patch Game..." button)
+  ButtplugBridge     - connects to Intiface Central and drives your toy
+                       (same thing the Launcher starts when you click Start)
+  ApkPatcher         - same as GamePatcher, but for an Android .apk file
+                       directly (patches the game data file inside it and
+                       re-signs the APK) - only needed if you're prepping
+                       an Android build, see ANDROID.txt. Needs a JDK.
+
+Pick the right folder for your machine:
+  cross-platform/linux-x64/    - most Linux desktops/laptops (Intel/AMD)
+  cross-platform/osx-x64/      - Intel Macs
+  cross-platform/osx-arm64/    - Apple Silicon Macs (M1/M2/M3/M4)
+
+On an Android phone instead? See ANDROID.txt - that uses
+cross-platform/linux-arm64/ (a different build, for Termux), not any of
+the three above.
+
+THE GAME ITSELF
+-------------------
+We only have Windows builds of Wife's Bedroom/ModRoom ourselves (no source
+project to build a native export from), so there are two situations:
+
+  A) You already have a NATIVE Linux/macOS build of the game (some distros
+     of it come with one - if you have a launcher script or a binary that
+     ISN'T a .exe, alongside a data file usually named data.win OR
+     game.unx OR game.ios). If so: nothing special needed - GamePatcher
+     works on that data file exactly the same way, whatever it's named.
+
+  B) You only have the Windows .exe. Run it through Wine (Linux) or
+     CrossOver (macOS, Wine-based, commercial). GameMaker games generally
+     run fine under Wine, and the toy support patch only adds a UDP
+     network send, which is a well-supported Wine feature - it should just
+     work, but this hasn't been tested first-hand since we don't have a
+     Linux/macOS machine to test with ourselves. If it doesn't work,
+     report back exactly what happens and we'll dig in.
+
+STEP BY STEP
+---------------
+  1. Open a terminal, go to the cross-platform/<platform>/ folder for your
+     machine.
+  2. Make both tools executable (only needed once):
+       chmod +x GamePatcher ButtplugBridge
+  3. Patch your game (one time only per install - safely does nothing if
+     already patched):
+       ./GamePatcher /path/to/your/game/data.win
+     (or point it at the game's main executable/launcher script instead -
+     it'll look for data.win/game.unx/game.ios right next to it)
+     It'll ask for confirmation before changing anything, and backs up the
+     original automatically. Add --yes to skip the confirmation prompt.
+  4. Install Intiface Central for your platform from
+     https://intiface.com/central/ (it has official Linux and macOS
+     builds, no Wine needed for this part) and connect your toy. Make sure
+     its server is started.
+  5. Run the bridge:
+       ./ButtplugBridge --profile easy
+     (profile names: default, easy, mid, hard, mideasy, midhard, custom -
+     see PROFILES.txt for what these mean. Leave off --profile for the
+     full default range.)
+  6. Launch the game (through Wine if needed). As soon as a scene is
+     active, your toy should respond.
+
+profiles.json (created next to ButtplugBridge the first time you run it)
+works exactly the same as on Windows - see PROFILES.txt.
+
+TROUBLESHOOTING
+------------------
+  "Permission denied" when running ./GamePatcher or ./ButtplugBridge
+    You skipped step 2 (chmod +x) - the download doesn't preserve the
+    executable bit.
+
+  GamePatcher says "not a compatible game"
+    Either you pointed it at the wrong file, or this genuinely isn't a
+    supported game/mod (only Wife's Bedroom and mods of it that still use
+    the same oFutaMatingPress object work - see NOTES.txt).
+
+  Toy doesn't respond
+    Same checklist as Windows: is Intiface Central's server actually
+    started, is the toy shown as connected in Intiface Central, and did
+    GamePatcher actually report success back in step 3?
+
+VERIFIED SO FAR
+-------------------
+GamePatcher (linux-x64/osx-x64/osx-arm64) was refreshed to include the
+--touch-controls patch and its custom-character-discovery fix (see
+ANDROID.txt) - same code as the Windows version, just recompiled for these
+platforms; nothing platform-specific changed. ToyLauncher for Linux
+(cross-platform/linux-x64/ToyLauncher) was also rebuilt as a "onedir"
+build (see LAUNCHER.txt for why) and confirmed to start up cleanly under
+WSL Ubuntu with no crash or missing-plugin errors - not run against a real
+graphical desktop session, but the Qt platform plugin loading (the thing
+that broke under the old onefile packaging) was directly confirmed healthy.
+
+GamePatcher and ButtplugBridge were both built for linux-x64/osx-x64/
+osx-arm64 and the linux-x64 builds were test-run for real (via WSL Ubuntu
+on the dev machine) - patching a real data.win worked identically to the
+Windows version (detected unpatched, patched, backed up, confirmed
+already-patched, safe no-op re-run), and ButtplugBridge started up,
+created profiles.json, listed profiles, and handled Intiface Central not
+being reachable gracefully (retry loop, no crash). The osx-x64/osx-arm64
+builds compiled cleanly but haven't been run on real hardware (no Mac
+available to test on) - if something's off there, that's the most likely
+place, and worth reporting back.

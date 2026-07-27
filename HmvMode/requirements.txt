@@ -1,0 +1,9 @@
+librosa
+sounddevice
+numpy<2.4
+
+# live.py only (main.py doesn't need these) - deliberately does NOT need librosa/numba, see
+# live.py's own docstring and HMVMODE.txt's "WHY NOT AN EXE" for why that distinction matters.
+soundfile
+scipy
+audioread  # fallback decoder for formats soundfile can't open (m4a/AAC, etc.) - needs ffmpeg on PATH

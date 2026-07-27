@@ -1,0 +1,49 @@
+# Never commit: actual game content, patched game builds, or signing credentials.
+# This repo is tooling ONLY - see NOTES.txt's "SHARING THIS MOD" policy.
+*.apk
+*.apk.idsig
+*.win
+*.win.bak
+*.unx
+*.ios
+*.droid
+*.keystore
+*.keystore.pass
+WifesBedroom-ToyBridge-*.zip
+
+# C# build output
+bin/
+obj/
+
+# Python build/venv output
+venv/
+build_venv/
+__pycache__/
+*.pyc
+dist/
+build/
+*.spec.bak
+
+# Compiled tool binaries - built from source per the docs, not committed (keeps the repo small
+# and means nothing unexpected ships that wasn't reviewed as source).
+*.exe
+*.dll
+*.jar
+_internal/
+cross-platform/
+
+# Runtime/user-specific state - generated fresh by the app on first run, not part of the source.
+launcher_settings.json
+profiles.json
+
+# Third-party installer downloads staged for the Inno Setup build, and its compiled output.
+installer/stage/
+installer/output/
+
+# Curated distribution bundles (discord-package*/shareable) mix docs with the same compiled
+# binaries/zips excluded above - the docs themselves are already tracked at the project root,
+# so these folders are treated as build output too rather than duplicated in source control.
+discord-package/
+discord-package-android/
+discord-package-linux-macos/
+shareable/

@@ -1,0 +1,38 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RuntimeIdentifiers>win-x64;linux-x64;osx-x64;osx-arm64</RuntimeIdentifiers>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <AssemblyName>ApkPatcher</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="UndertaleModLib">
+      <HintPath>E:\Downloads\UndertaleModTool_v0.9.1.2-Windows\UndertaleModLib.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="Underanalyzer">
+      <HintPath>E:\Downloads\UndertaleModTool_v0.9.1.2-Windows\Underanalyzer.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="Newtonsoft.Json">
+      <HintPath>E:\Downloads\UndertaleModTool_v0.9.1.2-Windows\Newtonsoft.Json.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="apksigner.jar">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>

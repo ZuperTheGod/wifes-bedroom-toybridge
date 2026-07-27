@@ -1,0 +1,178 @@
+TOY BRIDGE LAUNCHER - INSTALL VIDEO NARRATION SCRIPT
+=========================================================
+Structure: PART 1 (PC setup + play), PART 2 (prepare the Android APK, still
+on PC), PART 3 (full phone-only setup - Termux + toy bridge on the phone).
+Each numbered line is one narrated beat; [bracketed notes] are what to show
+on screen at that moment, not something to say out loud.
+
+PART 1 - PC SETUP AND PLAY
+---------------------------------
+1. "This is the Toy Bridge Launcher - it adds toy support to Wife's
+   Bedroom and ModRoom, on PC, Android, Linux, and macOS. I'll show PC
+   first, then how to get the same thing running entirely on a phone."
+   [Show the ToyBridgeLauncher-Setup.exe file]
+
+2. "Installing is just the normal Windows installer - run it, and I'll
+   leave both boxes checked: one installs Intiface Central for you if you
+   don't already have it, the other adds a desktop shortcut."
+   [Run the installer, show the two checkboxes, click through, Finish]
+
+3. "That's it - no game files were touched, and it opens itself when
+   done." [Launcher window opens]
+
+4. "Three tabs: Play, Mods, and Android. We'll start with Play."
+   [Point at the three tabs without clicking yet]
+
+5. "First, Intiface Central - this is what actually talks to the toy over
+   Bluetooth. Open it, make sure the server switch is on, and connect your
+   toy." [Show Intiface Central, toggle server on, toy shows connected]
+
+6. "Back in the Launcher, click Browse and point it at the game's .exe -
+   it only needs to be told once." [Browse dialog, pick the .exe]
+
+7. "Since this is the first time, click Patch Game. One click - it backs
+   up the original file automatically, and it's completely safe to click
+   again later, it just won't do anything if it's already patched."
+   [Click Patch Game, show the success message]
+
+8. "Now pick an intensity profile - Easy, Mid, Hard, or Default for the
+   full range. I'll use Easy for this demo." [Show the profile dropdown]
+
+9. "Leave 'Also launch the game' checked so one click starts everything,
+   then click Start." [Click Start]
+
+10. "The Launcher checks Intiface Central is reachable, starts the toy
+    bridge, and launches the game - all from that one click. The status
+    box shows the bridge's live connection state, so there's no separate
+    console window to hunt for." [Show status box, game launching]
+
+11. "Once a scene is active in-game, the toy responds automatically."
+    [Show a moment of gameplay + toy response if capturable]
+
+12. "When you're done, click Stop, or just close the Launcher - either one
+    makes sure the toy stops." [Click Stop]
+
+PART 2 - PREPARE THE ANDROID APK (still on the PC)
+---------------------------------------------------------
+13. "Now let's get this running on a phone instead. Everything for this
+    part happens once, on the PC - the phone never needs the PC again
+    after this." [Switch to the Android tab]
+
+14. "You need your own copy of the game's Android APK - we don't provide
+    it, you have to already own it. Click Browse and pick that .apk."
+    [Browse dialog, pick the APK]
+
+15. "If you want a PC mod's content instead of the vanilla game - ModRoom,
+    for example - check this box and point it at that mod's data.win."
+    [Check "Replace game content...", browse to data.win]
+
+16. "And if that mod has custom characters, bedrooms, or texture packs in
+    separate folders, check this box too and point it at the folder that
+    directly contains those - Android has no writable folder to drop mods
+    into later, so they have to be packaged in right now."
+    [Check "Bundle mod folders...", browse to the mods folder]
+
+17. "One more box if you're using a ModRoom-style mod specifically: 'Fix
+    touch controls and custom character selection.' ModRoom uses right-
+    click and mouse-wheel scrolling for some menus, which don't exist on a
+    touchscreen - this adds long-press and drag-to-scroll equivalents, and
+    without it the custom character picker doesn't work at all on
+    Android. Safe to leave checked either way."
+    [Check "Fix touch controls..."]
+
+18. "Click Patch APK. This can take anywhere from a few seconds to about a
+    minute, depending on how big the mod's data file is."
+    [Click Patch APK, show status box logging both passes]
+
+19. "Done - the finished .apk is saved right next to the original one you
+    picked." [Show the file in Explorer]
+
+20. "Copy that file to your phone however's easiest - USB cable, cloud
+    drive, emailing it to yourself." [Show the transfer, whichever method]
+
+PART 3 - FULL SETUP ON THE PHONE (no PC needed after this point)
+------------------------------------------------------------------------
+21. "Everything from here happens on the phone itself."
+    [Show the phone's home screen / file manager]
+
+22. "If the original, unpatched game is already installed, uninstall it
+    first - the patched one has a different signature, so it needs a
+    clean install, not an update." [Uninstall old app if present]
+
+23. "Open the .apk file to install it. Android will ask to allow installs
+    from whatever app you used to open it - allow that."
+    [Tap the file, allow unknown sources, Install]
+
+24. "Next, Intiface Central for Android - from the Play Store, or
+    intiface.com/central if you'd rather sideload it. Open it, connect
+    your toy, and make sure its server is started - same as on PC."
+    [Show Intiface Central on the phone, toy connecting]
+
+25. "Now Termux - get it from F-Droid or GitHub, NOT the old Play Store
+    version, that one's abandoned and won't work." [Show Termux installed]
+
+26. "Open Termux. The toy bridge needs a real Linux environment, which
+    Termux doesn't give you by default, so we'll install a small real
+    Linux distro inside it - this is a standard, well-known Termux trick,
+    nothing unusual to this project." [Termux terminal open]
+
+27. "Three commands, one time only:
+      pkg update
+      pkg install proot-distro
+      proot-distro install ubuntu"
+    [Type/show each command running]
+
+28. "If that fails with something like 'libssl.so.3 not found', Termux's
+    Python and its openssl package got out of sync - fix it with:
+      pkg upgrade -y
+      pkg install -y openssl
+    and try the install again." [Only show this if it actually happens]
+
+29. "Now log into that Ubuntu environment:
+      proot-distro login ubuntu
+    Your prompt changes to show you're inside it now."
+    [Show the prompt change]
+
+30. "We need the ButtplugBridge program inside this Ubuntu shell. The most
+    reliable way: serve it from a PC on the same Wi-Fi and download it
+    directly." [Show the file on a PC]
+
+31. "On the PC, in the folder with that file, run:
+      python -m http.server 8000
+    and leave that running." [Show the PC running this]
+
+32. "Back on the phone, inside the Ubuntu shell, find the PC's Wi-Fi IP
+    address (ipconfig on Windows), then run:
+      curl -O http://<that-ip>:8000/ButtplugBridge
+    Once it finishes downloading, you can stop the PC's http.server with
+    Ctrl+C." [Show the curl download completing]
+
+33. "Make it executable and run it:
+      chmod +x ButtplugBridge
+      ./ButtplugBridge --profile easy
+    Same profile names as the PC version - easy, mid, hard, default, and
+    so on." [Show ButtplugBridge starting, connecting to Intiface Central]
+
+34. "Leave Termux running in the background - some phones aggressively
+    kill background apps to save battery, so if the bridge stops
+    responding later, check Termux hasn't been closed, and turn off
+    battery optimization for it if needed." [Show battery settings, optional]
+
+35. "Now just launch the patched game on the phone and play - as soon as
+    a scene is active, the toy responds, exactly like on PC, just with
+    nothing but the phone involved." [Launch game, show toy response]
+
+36. "And that's the whole thing - PC play in a couple of clicks, or the
+    same experience running entirely on your phone once it's set up."
+    [Closing shot]
+
+NOTES FOR RECORDING
+------------------------
+- If a toy isn't handy to demonstrate response live, showing the status
+  box/log line confirming "connected" plus a scene playing is enough -
+  say so on camera rather than implying a toy reacted if it didn't.
+- Steps 27-29 (proot-distro) can take a few minutes to actually run -
+  consider cutting/speeding up that footage rather than recording it live.
+- If anything on screen doesn't match what's described here (a dialog
+  wording changed, a step behaves differently), that's worth flagging back
+  so this script and the tool itself both get corrected.

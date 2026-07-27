@@ -1,0 +1,60 @@
+TOY BRIDGE LAUNCHER - INSTALLER
+====================================
+
+WHAT IT INSTALLS
+-------------------
+  - ToyLauncher.exe and ButtplugBridge.exe (to %LocalAppData%\Programs\
+    ToyBridgeLauncher by default - no admin rights needed).
+  - Optionally, the official Intiface Central installer (bundled, from
+    https://github.com/intiface/intiface-central - runs silently as part
+    of setup unless you untick that option).
+  - Start Menu shortcuts, optional desktop shortcut.
+
+WHAT IT DOES NOT INSTALL
+-----------------------------
+Any game. On purpose - see NOTES.txt for why. The person running this
+installer needs their own already-installed copy of a compatible game
+(Wife's Bedroom, ModRoom, or a mod of either that still uses the same
+oFutaMatingPress object). After installing, they point the Launcher at it
+themselves with the "Browse..." button, then "Patch Game..." to enable toy
+support - both are one click each, no command line or separate tools
+needed.
+
+HOW TO BUILD IT
+-------------------
+Requires Inno Setup 6 (https://jrsoftware.org/isinfo.php, or
+`winget install --id JRSoftware.InnoSetup`).
+
+  1. Build fresh copies of the two exes and drop them in stage\:
+       cd ..\ToyLauncher
+       dotnet publish -c Release -r win-x64 --self-contained true
+       copy bin\Release\net10.0-windows\win-x64\publish\ToyLauncher.exe ..\installer\stage\
+       (ButtplugBridge.exe is built the same way from ..\ButtplugBridge\)
+  2. Make sure stage\intiface-central-setup.exe is a current copy of
+     Intiface Central's official Windows installer (check
+     https://github.com/intiface/intiface-central/releases/latest - if a
+     newer version exists, download its win-x64 .exe and replace this
+     file, keeping the same name).
+  3. Compile:
+       "%LocalAppData%\Programs\Inno Setup 6\ISCC.exe" ToyBridgeLauncher.iss
+     Output lands in installer\output\ToyBridgeLauncher-Setup.exe.
+
+TESTING IT SAFELY ON THIS MACHINE
+--------------------------------------
+Since this machine already has Intiface Central installed, test without
+touching that install by skipping the Intiface Central task and installing
+to a scratch folder:
+  ToyBridgeLauncher-Setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /TASKS= /DIR="C:\some\scratch\path"
+(An empty /TASKS= deselects the Intiface Central checkbox, which is
+checked by default otherwise.)
+
+WHAT'S IN THIS FOLDER
+--------------------------
+  ToyBridgeLauncher.iss   - the Inno Setup script (source of truth)
+  stage\                  - the files it bundles (rebuild these before
+                             recompiling if you've changed the launcher
+                             or bridge)
+  after_install.txt       - the "what to do next" text shown at the end
+                             of setup
+  output\                 - where the compiled Setup.exe lands (not
+                             checked into anything, regenerate as needed)

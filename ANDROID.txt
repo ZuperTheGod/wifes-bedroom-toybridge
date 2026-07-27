@@ -1,0 +1,271 @@
+ANDROID (fully phone-based, no PC needed to play)
+=======================================================
+
+This sets things up so the game, the toy bridge, and Intiface Central all
+run on your phone - no PC involved once it's set up. The one-time patching
+step below does need a PC (or see the Termux note at the bottom if you'd
+rather do literally everything on the phone).
+
+PREFER A GUI OVER THE COMMAND LINE FOR STEP 1? If you're on Windows, Linux,
+or macOS and already have ToyLauncher (see LAUNCHER.txt), its "Android" tab
+does exactly what Step 1 below does - browse to your APK, optionally browse
+to a replacement data file and/or a mods folder, click "Patch APK". Same
+underlying tool (ApkPatcher), just without the command line. Steps 2-4
+below are unchanged either way.
+
+WHAT YOU NEED
+----------------
+  - Your own Android build of a compatible game (an .apk - Wife's Bedroom,
+    ModRoom, or a compatible mod). We don't provide this - you already have
+    to have it.
+  - A JDK on your PC for the one-time patch step (free, from
+    https://adoptium.net - any recent version). Not needed on the phone.
+  - Intiface Central for Android (Play Store, or the .apk from
+    https://intiface.com/central/).
+  - Termux (for running the toy bridge on your phone) - from F-Droid or
+    GitHub, NOT the old abandoned Play Store version.
+
+STEP 1 - Patch your APK (on a PC, one time)
+------------------------------------------------
+  1. Copy your game's .apk to your PC if it isn't already there.
+  2. Run:
+       ApkPatcher.exe your-game.apk
+     It'll find the game's data file inside the APK automatically, patch
+     it, repackage the APK, and sign it with a new key (needed because
+     modifying an APK invalidates its original signature - this is normal
+     and expected, not a red flag). Output: your-game-toybridge.apk, right
+     next to the original. Your original file is never touched.
+  3. First run will also generate a signing key (apkpatcher.keystore) next
+     to ApkPatcher.exe - keep that around if you'll patch more APKs later,
+     it gets reused automatically.
+
+STEP 2 - Install the patched APK on your phone
+----------------------------------------------------
+  1. Copy the -toybridge.apk file to your phone (USB, cloud drive, email
+     to yourself, whatever's easiest).
+  2. If the original game is already installed, uninstall it first - the
+     patched version has a different signature, so Android won't treat it
+     as an update to the original, it needs a clean install.
+  3. Open the file on your phone to install it. You'll need "install from
+     unknown sources" enabled for whatever app you use to open it (Files,
+     a browser, etc.) - Android will prompt you for this if it's not
+     already on.
+
+STEP 3 - Set up the toy bridge in Termux
+----------------------------------------------
+The bridge itself needs a real Linux environment to run in, which Termux
+doesn't provide out of the box (it uses Android's own C library, which is
+close to but not the same as regular Linux) - so this uses Termux's
+"proot-distro" feature to run a small real Linux distro inside Termux.
+This is a well-established, common Termux technique, not something unusual
+to this project.
+
+  1. Install Termux, open it.
+  2. One-time setup:
+       pkg update
+       pkg install proot-distro
+       proot-distro install ubuntu
+     If this fails with something like "ImportError: dlopen failed: library
+     libssl.so.3 not found", Termux's Python and its openssl package are out
+     of sync - fix it and retry:
+       pkg upgrade -y
+       pkg install -y openssl
+     Still failing after that? Force a reinstall of both:
+       pkg reinstall -y python openssl
+  3. Log into the Ubuntu environment - no username or password needed, this
+     just drops you straight into a root shell inside it:
+       proot-distro login ubuntu
+     Your prompt changing (usually to something like root@localhost:~#) is
+     how you know it worked.
+  4. Get the linux-arm64 ButtplugBridge binary (from
+     cross-platform/linux-arm64/ButtplugBridge in this folder) into that
+     Ubuntu shell. The most reliable way, since Android's shared-storage
+     permissions and file-transfer apps can be finicky: serve it from your
+     PC and download it directly.
+       On your PC, in the folder containing that ButtplugBridge file:
+         python -m http.server 8000
+       (leave that running) Then, on your phone, connected to the SAME
+       Wi-Fi as your PC, inside the Ubuntu shell from step 3:
+         curl -O http://<your-pc's-LAN-IP>:8000/ButtplugBridge
+       (find your PC's LAN IP with `ipconfig` on Windows, look for the
+       Wi-Fi adapter's IPv4 Address). Stop the PC's http.server (Ctrl+C)
+       once the download finishes.
+     Alternative if you'd rather not run anything on your PC: copy the file
+     to your phone's Downloads folder any way you like (USB, cloud drive,
+     a file-sharing app), run `termux-setup-storage` once in Termux (NOT
+     inside the Ubuntu shell) to grant storage access, then from inside
+     Ubuntu copy it from wherever it landed under ~/storage/ (paths with
+     spaces need quoting, e.g. cp ~/storage/downloads/"some folder/file" .)
+  5. Still inside the Ubuntu shell:
+       chmod +x ButtplugBridge
+       ./ButtplugBridge --profile easy
+     (profile names: default, easy, mid, hard, mideasy, midhard, custom -
+     see PROFILES.txt)
+
+STEP 4 - Connect everything and play
+------------------------------------------
+  1. Open Intiface Central, connect your toy, make sure its server is
+     started. (You already know this part works well on mobile.)
+  2. Make sure ButtplugBridge (from Step 3) is running in your Ubuntu/
+     Termux session and shows "connected to Intiface Central."
+  3. Launch the patched game and play. As soon as a scene is active, your
+     toy should respond.
+
+You'll want Termux running in the background while you play the game -
+Android may try to kill background apps aggressively to save battery;
+if the bridge stops responding, check that Termux hasn't been closed out
+by the system (some phones have aggressive battery optimization that needs
+to be disabled specifically for Termux - look for "battery optimization"
+or "auto-start management" in your phone's settings).
+
+WANT A PC MOD (LIKE MODROOM) ON ANDROID INSTEAD OF THE VANILLA GAME?
+--------------------------------------------------------------------
+ApkPatcher can also swap in a completely different data file before patching,
+using --replace-data. This is how you get a PC mod's content (not just the
+official game) running on Android - point it at your own copy of the
+official APK plus your own copy of the mod's data.win, and it builds an APK
+with that mod's content plus toy telemetry. Nothing about the mod or the
+original game is bundled with this tool - both files are ones you already
+have, and the output only ever goes to your own machine.
+
+  ApkPatcher your-game.apk --replace-data "path\to\ModRoom\data.win"
+
+Everything else about Steps 1-4 above is unchanged - this just changes what
+ends up inside the patched APK. Whenever the mod you're using gets updated
+(a new ModRoom version, for instance), just re-run this same command
+pointing at the new data.win to get a fresh APK - you don't need to redo
+anything else.
+
+WANT CUSTOM CHARACTERS/DIALOGUE/TEXTURE PACKS TOO (ModRoom's custom_wives,
+custom_futas, custom_bedrooms, dialogue_packs, texture_packs folders)?
+--------------------------------------------------------------------------
+These do NOT work automatically, even with --replace-data above. On PC these
+are plain folders sitting next to the game's .exe that you can drop mods
+into any time. Android doesn't have an equivalent writable location - it
+was confirmed directly (by patching in a one-line diagnostic that logs
+GameMaker's working_directory to the device log) that on Android,
+working_directory resolves to the APK's own bundled assets/ folder, a
+read-only location baked in at build time. There's no folder on the phone
+you can just drop a new mod into later - it has to be packaged into the APK
+itself, at the same time you patch it.
+
+Use --include-mods for this, pointing it at whatever folder directly
+contains those five subfolders (your ModRoom install folder, for example):
+
+  ApkPatcher your-game.apk --replace-data "path\to\ModRoom\data.win" --include-mods "path\to\ModRoom"
+
+Whichever of the five folders exist are copied into the APK. This is
+everyone's OWN choice of mods each time they run the tool - nothing about
+any specific mod ships with ApkPatcher itself, same as everything else in
+this project.
+
+ALSO RUNNING A ModRoom-STYLE MOD? YOU NEED --touch-controls TOO
+--------------------------------------------------------------------------
+ModRoom (and mods based on it) relies on right-click and mouse-wheel
+scrolling for some menus - inputs that have no touchscreen equivalent at
+all. Without this patch, some settings menus are simply impossible to
+interact with on Android, AND the custom wife/futa picker's CUSTOM button
+stays permanently disabled, even with --include-mods bundling the mod
+folders correctly - the game's own folder-scanning code doesn't work
+against files bundled inside an Android APK, so it silently finds nothing.
+This does NOT affect the official vanilla game, which has no menus that
+depend on right-click/scroll-wheel in the first place.
+
+Run this as a SECOND pass, on the output of your first command above (it
+can't be combined with --replace-data/--include-mods in one run):
+
+  ApkPatcher your-game-toybridge.apk --touch-controls
+
+This adds a long-press (holds ~450ms) as a right-click equivalent, drag-to-
+scroll for scrollable menus, and fixes the custom character picker to
+actually find bundled mods. (The GUI Launcher's Android tab does both
+passes for you automatically behind one "Fix touch controls and custom
+character selection" checkbox - see LAUNCHER.txt.)
+
+Custom WIFE characters specifically: only wife mod packs built as a full
+ModRoom-compatible "rig" (matching the file layout of the bundled
+custom_wife_template) actually render correctly via the CUSTOM button -
+this is true on PC too, not just Android. A wife pack built differently
+(a different, simpler file-naming convention some downloaded packs use)
+may become selectable but will render visibly broken (chopped-up body
+parts, garbled facial expressions) because it's missing artwork the game's
+layered rendering system requires - that's a limitation of the specific
+mod pack's own content, not something --touch-controls or any patch can
+fix. Custom FUTA characters aren't affected by this - the futa side
+already supports both file-naming conventions.
+
+CONFIRMED WORKING (tested on a real Android device/emulator): ModRoom
+V3.2's data.win swapped into the official Wife's Bedroom APK installs,
+launches, and renders correctly (title screen shows "VANILLA 1.1 + MODROOM
+V3", confirming it's genuinely running the mod's content), stays stable
+with no crashes, and correctly detects/re-applies the toy telemetry patch.
+With --include-mods and --touch-controls both applied: right-click menus
+work via long-press, and the custom futa picker correctly loads every
+real custom futa pack tested (15 of 15 actual character packs - the one
+non-loading folder in that test turned out to be a dialogue-only mod with
+no character art at all, so it correctly doesn't count). Custom wife packs
+built as a proper compatible rig (like the bundled custom_wife_template)
+load and render correctly the same way; wife packs using the simpler,
+non-rig convention become selectable but render broken, per the caveat
+above - this was tested and is a known, permanent limitation of those
+specific packs' content, not a bug in this tool. Drag-to-scroll has been
+patched but a user report that it wasn't working as expected is still
+being looked into as of this writing - the pill menu specifically now
+sidesteps that entirely instead of depending on it: --touch-controls
+lays out all 14 pills as two columns of 7 (nothing can run off-screen
+regardless of device layout), verified on a real Android build (see
+NOTES.txt for the details, including why 2 columns replaced an earlier
+single-tall-column attempt). Other scrollable menus (custom wife/futa/
+background pickers) still rely on the not-yet-fixed drag-to-scroll.
+
+TROUBLESHOOTING
+------------------
+  ApkPatcher can't find Java
+    Install a JDK from https://adoptium.net and make sure it's on your
+    PATH, then try again.
+
+  "App not installed" / install fails on the phone
+    Almost always the old original version is still installed with a
+    different signature - uninstall it first, then try the patched one.
+
+  ApkPatcher says "not a compatible game"
+    Either the wrong file was selected, or this genuinely isn't a
+    supported game/mod - see NOTES.txt for which ones are confirmed to
+    work.
+
+  proot-distro install ubuntu fails with "libssl.so.3 not found"
+    Termux's Python and openssl packages are out of sync - see Step 3
+    above for the fix (pkg upgrade + pkg install openssl).
+
+  cp says "cannot stat" with a bunch of unrelated-looking word fragments
+    Your file path has spaces in it and wasn't quoted, so the shell split
+    it into multiple arguments. See the file-transfer note in Step 4 -
+    either quote the spacey part, or just use the http.server/curl method,
+    which avoids the whole problem.
+
+  Toy doesn't respond
+    Same checklist as every other platform: is Intiface Central's server
+    actually started, is the toy shown as connected there, is
+    ButtplugBridge showing "connected" rather than stuck retrying, and is
+    Termux still actually running (not killed in the background)?
+
+HONEST STATUS
+-----------------
+The patch itself (Steps 1-2) has been verified for real: patched, re-signed,
+installed, and launched a real copy of the game on an Android emulator, and
+it ran correctly (same startup sequence seen on every other platform, no
+crash). The --replace-data option (swapping in a PC mod's data.win, like
+ModRoom) was also verified for real the same way.
+
+Steps 3-4 have now been walked through live with a real person setting up
+Termux on their own phone, start to finish through getting ButtplugBridge
+downloaded and executable inside the Ubuntu proot environment - the libssl
+fix and the http.server/curl file-transfer method above both come directly
+from real snags hit and resolved during that session, not guesswork. What
+hasn't been separately confirmed yet is a toy actually responding through
+that exact chain (Termux bridge -> Intiface Central -> toy, all on one
+phone) - Intiface Central on mobile itself is confirmed working separately
+by the person this was built for, and ButtplugBridge's Intiface-connection
+code is identical to the Windows/Linux builds (which are confirmed working),
+so this is expected to work, but hasn't been watched succeed end-to-end in
+one sitting yet.

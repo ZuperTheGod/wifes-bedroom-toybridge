@@ -1,0 +1,69 @@
+INTENSITY PROFILES
+=====================
+
+A "profile" picks how strong the toy response is allowed to get, without
+needing to rebuild anything. It squeezes the final output into a percentage
+range - e.g. "easy" never sends more than 30% strength, "hard" never sends
+less than 60%. This gives you a rough expectation of what a session will
+feel like before you even start.
+
+EASIEST WAY TO PICK ONE: use ToyLauncher.exe (see LAUNCHER.txt) - it's a
+dropdown, no command line needed. Everything below is the manual/
+command-line way, useful if you want to script things yourself.
+
+Everything else about HOW the response behaves (how reactive it is, the
+orgasm pulse shape, stroke speed, etc. - see TUNING.txt) still works exactly
+the same underneath. A profile is just a final "squeeze it into this band"
+step layered on top.
+
+THE 7 BUILT-IN PROFILES
+--------------------------
+  default    0%   - 100%     Full range, exactly as tuned (no squeeze).
+  easy       0%   - 30%      Always gentle, never spikes hard.
+  mid        30%  - 60%      Moderate throughout, no weak or extreme moments.
+  hard       60%  - 100%     Always strong, never trails off soft.
+  mideasy    0%   - 50%      Gentle-to-moderate, softer half of the range.
+  midhard    50%  - 100%     Moderate-to-strong, stronger half of the range.
+  custom     0%   - 100%     Yours to define - see below.
+
+HOW TO PICK ONE
+------------------
+Run the bridge with --profile <name>, for example:
+
+  ButtplugBridge.exe --profile easy
+  ButtplugBridge.exe --profile hard
+
+If you don't pass --profile at all, it uses "default" (the full range).
+
+To see what's available at any time:
+
+  ButtplugBridge.exe --list-profiles
+
+If you typo a profile name, it'll tell you and fall back to "default"
+rather than failing silently.
+
+WHERE THEY'RE STORED
+------------------------
+The first time you run ButtplugBridge.exe, it creates a file called
+profiles.json right next to it (in the same folder) with the 7 profiles
+above, and comments explaining the format. Nothing needs rebuilding to
+change these - just edit that text file and restart the bridge.
+
+MAKING YOUR OWN "custom" PROFILE
+-------------------------------------
+Open profiles.json in Notepad. Find this line:
+
+  "custom":   { "min": 0,  "max": 100 }
+
+Change the two numbers (0-100 each, min must be less than max) to whatever
+range you want, save, then run:
+
+  ButtplugBridge.exe --profile custom
+
+You can also add entirely new named profiles the same way - just copy the
+pattern (a name, a comma, then { "min": X, "max": Y }) as another line
+inside the "profiles": { ... } block. Keep the commas between entries
+correct (no comma after the very last one) and it'll just work.
+
+If you ever mess up the file's formatting, delete profiles.json entirely -
+the bridge will recreate it fresh with the 7 defaults next time it runs.

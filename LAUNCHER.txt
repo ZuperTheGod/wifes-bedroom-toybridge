@@ -1,0 +1,176 @@
+TOY LAUNCHER (easiest way to play with toy support)
+========================================================
+
+If you don't want to deal with command lines or editing text files at all,
+use ToyLauncher. This is the simplest way to use everything else described
+in this buttplug-mod folder - and it no longer needs to sit next to the
+game's own files (see below).
+
+As of this version, the Launcher is cross-platform (Windows, Linux, macOS)
+- it's built with Python/PySide6 (Qt) rather than being Windows-only. Same
+window, same features, same settings file format, on any of the three.
+Pre-built copies:
+  ToyLauncher.exe                       - Windows
+  cross-platform/linux-x64/ToyLauncher  - Linux
+  (no pre-built macOS copy - no Mac was available to build one on. See
+  ToyLauncherQt/ for the source and requirements.txt if you have a Mac and
+  want to build it yourself: pip install -r requirements.txt, then
+  pyinstaller ToyLauncher.spec)
+
+IMPORTANT: both pre-built copies are "onedir" builds - each ToyLauncher/
+ToyLauncher.exe file has a companion "_internal" folder that MUST stay
+in the same folder as it (that's how it ships here already; just don't
+move/copy the exe or binary out on its own). This is deliberate, not a
+packaging mistake - an earlier "onefile" build re-extracted itself into a
+temp folder on every launch, which on Windows got its Qt display plugin
+quarantined by some antivirus setups, causing it to fail to start at all
+with a "no Qt platform plugin could be initialized" error. onedir avoids
+that whole problem by not extracting anything at runtime.
+
+The Launcher window has three tabs:
+  Play    - patch your game, pick an intensity profile, start/stop the toy
+            bridge (this is everything the Launcher used to do)
+  Mods    - manage ModRoom-style mods (custom characters, bedrooms,
+            dialogue, texture packs) without hand-editing folders
+  Android - prepare an Android .apk with toy support (and optionally a PC
+            mod's content) for playing entirely on your phone
+
+PLAY TAB
+----------------
+  1. Start Intiface Central and connect your toy. Make sure its server is
+     started (there's a "Start Server" switch inside it) - the launcher
+     will warn you if it can't see it, and has a button to open Intiface
+     Central for you if needed.
+  2. Double-click ToyLauncher (or run it from a terminal on Linux/macOS if
+     you'd rather).
+  3. Next to "Game:", click "Browse..." and pick the game's .exe/executable
+     (only needed once - it's remembered after that). The launcher does NOT
+     need to be installed inside the game's own folder; it can point at a
+     game anywhere on your PC.
+  4. If this is the first time setting up toy support for that particular
+     game, click "Patch Game..." - one click, automatically backs up the
+     original data file first, and safely does nothing if it's already
+     patched. This does the same thing the AddButtplugTelemetry.csx /
+     UndertaleModTool route does, just without needing UndertaleModTool.
+  5. Pick an intensity profile from the dropdown:
+       Default    - full range, strongest possible response
+       Easy       - always gentle (0-30%)
+       Mid        - moderate throughout (30-60%)
+       Hard       - always strong (60-100%)
+       Mid-Easy   - softer half of the range (0-50%)
+       Mid-Hard   - stronger half of the range (50-100%)
+       Custom     - set your own Min%/Max% with the two boxes that appear
+     (see PROFILES.txt if you want more detail on what these mean)
+  6. Leave "Also launch the game" checked if you want one click to start
+     everything, or uncheck it if you'll start the game yourself.
+  7. Click Start. The launcher will:
+       - check that Intiface Central is reachable (and offer to open it if not)
+       - start the toy bridge with your chosen profile
+       - launch the game (if you left that box checked)
+  8. Play. Your choices (game location, profile, etc.) are remembered for
+     next time. The toy bridge's own live status (connecting, device found,
+     etc.) streams straight into the Launcher's own Status box - there's no
+     separate console window to go looking for.
+  9. When you're done, click Stop to make sure your toy stops (closing the
+     Launcher's window does this automatically too).
+
+That's it - no files to edit, no terminal needed. TUNING.txt and
+PROFILES.txt are still there if you (or someone more technical) ever want
+to go deeper, but the launcher covers the normal day-to-day use case.
+
+TROUBLESHOOTING
+------------------
+  "Can't find ButtplugBridge"
+    ButtplugBridge needs to be in the SAME folder as ToyLauncher (they're
+    always installed together). The game does NOT need to be in that
+    folder though - that's set separately via "Browse...".
+
+  "Patch Game..." says it's not a compatible game
+    This tool only knows how to patch Wife's Bedroom and mods/forks of it
+    that still use the same underlying oFutaMatingPress object (ModRoom is
+    confirmed compatible). A different game entirely isn't supported.
+
+  Toy doesn't respond even though everything launched
+    Almost always means Intiface Central's server isn't actually started,
+    or your toy isn't connected/paired in Intiface Central yet. Check
+    Intiface Central's own window for a device listed there first. Also
+    double check the game was actually patched (step 4 above) - if it
+    wasn't, the game has nothing to send toy data with.
+
+  Want to go back to command-line control instead
+    You still can - ButtplugBridge --profile <name> works exactly as
+    before, the launcher is just a convenience layer on top of it.
+
+MODS TAB
+----------
+Manages the external mod folders ModRoom (and compatible mods) read
+directly - custom_wives, custom_futas, custom_bedrooms, dialogue_packs,
+texture_packs - the same folders you'd otherwise drag-and-drop mods into
+by hand next to the game.
+
+  1. "Mods folder" defaults to your game's own folder (where those five
+     folders normally live) - click "Change..." if your mods live
+     somewhere else, or "Open Folder" to browse them directly in your
+     file manager.
+  2. The tree below lists everything currently installed, grouped by
+     category, with a count next to each.
+  3. "Add Mod (.zip)..." - pick one or more mod zips (the kind you'd
+     download from Discord). The Launcher looks inside each one and
+     guesses which category it belongs to (by file extension - .wife,
+     .futa, .bedroom, .json, or .png), then asks you to confirm or correct
+     the guess before installing. It never guesses silently.
+  4. "Remove Selected" - deletes the selected mod's folder (or file, for a
+     flat dialogue .json). Select a specific mod, not a category header.
+  5. "Refresh" - re-scans the mods folder (useful if you added/removed
+     something by hand outside the Launcher).
+
+ANDROID TAB
+-------------
+A GUI front end for ApkPatcher - prepares an Android .apk with toy support
+(and optionally a PC mod's content) without needing the command line. Run
+this once on a PC; after that, everything runs on the phone. See
+ANDROID.txt for the full picture of what this fits into (Termux, Intiface
+Central on mobile, etc.) - this tab only covers the one-time patch step.
+
+  1. "Source APK" - browse to your own copy of the game's Android .apk.
+  2. Optionally check "Replace game content with a different data file" and
+     browse to a PC mod's data.win (e.g. ModRoom's) if you want that mod's
+     content running on Android instead of the vanilla game.
+  3. Optionally check "Bundle mod folders...from:" and point it at the
+     folder containing custom_wives/custom_futas/etc. (usually the same
+     folder as the Mods tab above) - required for those mods to actually
+     work on Android, since Android has no writable folder to drop them
+     into after the fact the way PC does.
+  4. If you're patching a ModRoom-style mod (not the official game), also
+     check "Fix touch controls and custom character selection". ModRoom
+     relies on right-click and mouse-wheel scrolling for some menus, which
+     have no touchscreen equivalent at all, and its custom wife/futa picker
+     doesn't work on Android without this fix either. Safe to leave checked
+     even for the official game - it only changes behavior code paths
+     ModRoom-style mods actually use. When checked, this runs ApkPatcher
+     TWICE behind the scenes (once for the base patch, once for this fix)
+     and cleans up the intermediate file automatically - you'll see both
+     passes logged in the Status box.
+  5. Click "Patch APK". This can take anywhere from several seconds to
+     around a minute depending on the size of the data file - the Status
+     box shows exactly what's happening, and the final line tells you
+     where the finished .apk was saved (next to the source APK, by
+     default).
+  6. Copy that .apk to your phone and install it as usual.
+
+  Toy support/mod issues on Android
+    See ANDROID.txt and NOTES.txt - both were written from real hands-on
+    testing, including issues that are easy to hit and non-obvious to
+    diagnose: Android running the game's working_directory out of the
+    APK's own bundled assets (why --include-mods/"Bundle mod folders" is
+    required at all, not just convenient), ModRoom's right-click/scroll-
+    wheel menus having no touch equivalent (why the touch-controls checkbox
+    above exists), and Termux/proot-distro setup quirks if you're also
+    setting up the toy bridge itself on the phone.
+
+  Custom wife characters still not selectable/look broken on Android
+    Only wife mod packs built as a full ModRoom-compatible "rig" (matching
+    custom_wife_template's file layout) work via the CUSTOM button - this
+    is a content limitation of the mod pack itself, not something the
+    Launcher or ApkPatcher can patch around, and it's the same on PC. See
+    NOTES.txt for the full technical explanation if you're curious.

@@ -1,0 +1,13 @@
+Toy Bridge Launcher is installed.
+
+One more thing before it's useful: it doesn't come with any game. Open the
+Launcher, click "Browse..." next to "Game:" and point it at your own
+already-installed copy of a compatible game (Wife's Bedroom, ModRoom, or a
+similar mod of it).
+
+If that game hasn't been set up for toy support yet, click "Patch Game..."
+right after - it's a one-time, one-click step (it also backs up the
+original file automatically first).
+
+Then: start Intiface Central and connect your toy, pick an intensity
+profile in the Launcher, and click Start.

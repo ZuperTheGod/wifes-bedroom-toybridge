@@ -1,0 +1,127 @@
+HOW TO RETUNE THE TOY FEEL (no coding experience required)
+=============================================================
+
+NOTE: If all you want is an overall weaker/stronger session (e.g. "keep it
+gentle" or "go all-in"), you probably don't need any of this - see
+PROFILES.txt instead, which needs no rebuilding at all, just a command-line
+switch. This file is for changing the underlying FEEL (how reactive it is,
+the orgasm pulse shape, stroke speed limits, etc.), which does need a
+rebuild.
+
+Everything about how the game's thrust animation translates into toy
+vibration/stroke intensity is controlled by a handful of numbers near the
+top of one file. You don't need to understand the rest of the code - just
+follow these steps.
+
+WHAT YOU NEED
+--------------
+  - The .NET 10 SDK. Check if you already have it: open a terminal
+    (PowerShell) and run:  dotnet --list-sdks
+    If nothing starting with "10." is listed, install it from
+    https://dotnet.microsoft.com/download/dotnet/10.0 (get the "SDK",
+    not just the runtime), or via winget:
+      winget install --id Microsoft.DotNet.SDK.10
+  - A text editor (Notepad is fine).
+
+STEP 1 - Open the settings file
+---------------------------------
+Open this file in Notepad (or any text editor):
+  buttplug-mod\ButtplugBridge\Program.cs
+
+Find this block near the top (search for "Tunables" if your editor supports
+Find, Ctrl+F):
+
+    // ---- Tunables: adjust these to change how "thrust" feels on your toys ----
+    const double VibeDeltaScale = 7.0;
+    const double VibeSmoothing = 0.35;
+    const double OrgasmFloor = 0.45;
+    const double OrgasmPulseAmplitude = 0.25;
+    const double OrgasmPulseHz = 3.0;
+    const double MinStrokeDurationMs = 100;
+    const double MaxStrokeDurationMs = 1800;
+    const int TelemetryTimeoutMs = 500;
+    const int ControlHz = 30;
+
+STEP 2 - What each one does
+------------------------------
+All the "0..1" ones are fractions - 0 = off, 1 = maximum intensity your toy
+supports (Buttplug always scales to whatever your specific toy's real max
+is, so 1.0 is never literally dangerous, just "as strong as the toy goes").
+
+  VibeDeltaScale (default 7.0)
+    Controls how strongly a moving thrust translates into vibration.
+    Higher = a small thrust movement already buzzes hard.
+    Lower  = you need bigger/faster thrusting before it buzzes noticeably.
+    Try 4-5 for gentler, 9-12 for much more sensitive.
+
+  VibeSmoothing (default 0.35, range 0..1)
+    How quickly the vibration responds to changes.
+    Higher = snappier / more twitchy, follows every little wiggle.
+    Lower  = smoother, more "rolling" feel, less jittery.
+    Try 0.15-0.2 for smooth, 0.5+ for very reactive.
+
+  OrgasmFloor (default 0.45, range 0..1)
+    The MINIMUM vibration intensity during the game's orgasm animation.
+    This is the main "how intense is climax" knob.
+    This was just lowered from 0.75 -> 0.45 because it felt too intense.
+    If it's STILL too strong, try 0.25-0.35. If too weak, try 0.55-0.65.
+
+  OrgasmPulseAmplitude (default 0.25, range 0..1)
+    How much the intensity pulses up and down on top of OrgasmFloor during
+    orgasm (so actual range is roughly OrgasmFloor to OrgasmFloor+this).
+    Higher = more dramatic pulsing. Lower = steadier/flatter.
+
+  OrgasmPulseHz (default 3.0)
+    How fast that pulse cycles, in pulses per second. Try 2.0 for a slower,
+    more deliberate pulse, or 5.0+ for a rapid flutter.
+
+  MinStrokeDurationMs / MaxStrokeDurationMs (default 100 / 1800)
+    Only matters if you have a stroker-type device (e.g. The Handy). These
+    cap how fast/slow it's ever told to move, in milliseconds per stroke.
+    Lower MinStrokeDurationMs = allow faster max stroking.
+    Higher MaxStrokeDurationMs = allow slower min stroking.
+
+  TelemetryTimeoutMs (default 500)
+    How long (in milliseconds) with no signal from the game before toys are
+    told to stop, e.g. when you close the game or leave the scene. Rarely
+    needs changing.
+
+  ControlHz (default 30)
+    How many times per second the bridge re-evaluates and sends commands.
+    Rarely needs changing; some very old/slow toys may want this lower
+    (e.g. 15) if commands seem to queue up or lag.
+
+STEP 3 - Change ONE thing at a time
+--------------------------------------
+Edit the number(s) you want to change, save the file. Changing one thing at
+a time makes it much easier to tell what effect it had.
+
+STEP 4 - Rebuild
+-------------------
+Open a terminal in the ButtplugBridge folder and run:
+
+  cd "D:\NSFW Games\wifes_bedroom_win\buttplug-mod\ButtplugBridge"
+  dotnet publish -c Release -r win-x64 --self-contained true
+
+This takes a few seconds and produces a new ButtplugBridge.exe at:
+  bin\Release\net10.0\win-x64\publish\ButtplugBridge.exe
+
+STEP 5 - Install the new build
+----------------------------------
+Copy that new exe over the one you actually run, replacing it:
+
+  copy "bin\Release\net10.0\win-x64\publish\ButtplugBridge.exe" "D:\NSFW Games\wifes_bedroom_win\ButtplugBridge.exe"
+
+(If you're re-sharing this mod with someone else, also copy it into
+buttplug-mod\shareable\ButtplugBridge.exe.)
+
+STEP 6 - Test
+----------------
+Close any already-running ButtplugBridge.exe first (it won't pick up
+changes while running - you have to restart it), then launch the new one
+and play. Repeat from Step 3 as needed.
+
+TIP: run with --verbose to see live numbers in the terminal while testing
+(useful for seeing exactly what intensity is being computed without needing
+a toy plugged in):
+  ButtplugBridge.exe --verbose

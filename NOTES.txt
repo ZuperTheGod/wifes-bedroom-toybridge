@@ -1,0 +1,1505 @@
+WIFE'S BEDROOM - BUTTPLUG.IO TOY INTEGRATION
+=============================================
+Written: 2026-07-20. Read this first if you (or another AI session) need to
+revisit, retune, or re-apply this mod later.
+
+For step-by-step tuning instructions (no coding experience needed), see
+TUNING.txt (deep, rebuild-required feel tuning), PROFILES.txt (quick,
+no-rebuild intensity presets), and LAUNCHER.txt (GUI, no command line at
+all) in this same folder - all written for the user/other people to follow
+directly without needing an AI session at all.
+
+STATUS: Installed and working (confirmed by the user with a real toy,
+2026-07-20). Also installed on a second game: ModRoom V3.2, at
+D:\NSFW Games\ModRoom V3.2\ModRoom V3.2\ (see changelog below - this is a
+heavily content-modded fork of the same base game, confirmed to share the
+identical oFutaMatingPress code, so the same patch/tooling applies
+unmodified to both installs).
+
+CHANGELOG:
+  2026-07-21: Orgasm pulse felt too intense. Lowered OrgasmFloor 0.75 -> 0.45
+  and OrgasmPulseAmplitude 0.2 -> 0.25, OrgasmPulseHz 4.0 -> 3.0 (so orgasm
+  intensity now ranges ~0.45-0.70 instead of ~0.75-0.95, average intensity
+  down roughly a third, still clearly pulsing). Rebuilt and redeployed to
+  both D:\NSFW Games\wifes_bedroom_win\ButtplugBridge.exe and
+  buttplug-mod\shareable\ButtplugBridge.exe. Also restructured shareable\ to
+  be fully self-contained (bundled ButtplugBridge source + TUNING.txt) so
+  the tuning instructions are actually usable by whoever receives that
+  folder, not just the original user.
+
+  2026-07-21 (same day, later): Added intensity PROFILES - a --profile
+  <name> CLI switch that squeezes the final vibe/stroke output into a
+  percentage band, no rebuild required. 7 built-in profiles: default
+  (0-100%, i.e. identity/unchanged), easy (0-30%), mid (30-60%), hard
+  (60-100%), mideasy (0-50%), midhard (50-100%), custom (0-100%, user's own
+  to edit). Implementation: profiles live in profiles.json, created next to
+  the exe on first run if missing (JSON with // comments, parsed via
+  System.Text.Json with JsonCommentHandling.Skip + AllowTrailingCommas).
+  Loaded into a Dictionary<string, ProfileRange> (case-insensitive keys),
+  selected via --profile (falls back to "default" with a warning on unknown
+  names, does not crash). The remap itself: in RunButtplugLoopAsync, a
+  local `Remap(v01) => profileMin + clamp(v01,0,1) * (profileMax-profileMin)`
+  is applied to smoothedVibe/strokePos ONLY at the point they're sent to
+  devices (SendToDevicesAsync) - the underlying EMA/orgasm-pulse state
+  variables themselves stay in raw 0..1 space across frames, so switching
+  profiles never distorts the underlying feel dynamics, only rescales the
+  final output. The stop-all-devices path (StopAllAsync, used when a scene
+  ends) is NOT remapped - it always sends a literal full stop, regardless of
+  profile min, so toys turn fully off between scenes rather than idling at
+  the profile's floor. New CLI flags: --profile <name>, --list-profiles.
+  Verified: --list-profiles output, profiles.json auto-creation content,
+  unknown-profile fallback behavior, and the Remap formula's boundary
+  values (0->min, 1->max) all checked directly. Was NOT able to do a full
+  live device test with Intiface Central's server actually running this
+  round (would need someone to click "Start Server" in its GUI, which isn't
+  scriptable) - but the send-to-device call path is identical to what was
+  already proven live in the original (non-profile) build; only the input
+  value changed. Deployed to D:\NSFW Games\wifes_bedroom_win\ButtplugBridge.exe
+  + profiles.json, and mirrored into buttplug-mod\shareable\.
+
+  2026-07-22: Two things.
+
+  (1) Ported to a second game: ModRoom V3.2 (D:\NSFW Games\ModRoom V3.2\
+  ModRoom V3.2\, exe still named wifes_bedroom.exe - it's a heavily
+  content-modded fork/superset of the same base game, uses BepInEx +
+  custom_wives/custom_futas/dialogue_packs content packs, data.win is
+  ~8.5MB vs the original's ~23MB (most content loaded externally rather
+  than baked in), bytecode version still 17). Checked first before
+  assuming compatibility: decompiled its oFutaMatingPress Create_0/Draw_0
+  and confirmed byte-for-byte identical marker lines ("thrust_time = 0;",
+  "thrust_prev = thrust;") and all the same variable names (thrust,
+  thrust_prev, thrust_speed, thrust_strength, insert, orgasm). Ran the
+  exact same `markerpatch` logic (see utmt-tool notes above) against a
+  backed-up copy of ModRoom's data.win with zero changes needed - compiled
+  clean, decompiled-back-out diff-confirmed identical patch shape, then
+  live-tested: launched the patched game, listened on UDP 45735, got real
+  telemetry (confirmed format: "0.17,0.17,3.30,2.47,1,0" etc., matching
+  spec). Backed up original as data.win.bak in that folder before
+  overwriting, same as the original install. Deployed the SAME
+  ButtplugBridge.exe binary there unmodified (it's fully game-agnostic -
+  doesn't know or care which game sent the telemetry) plus its own
+  profiles.json (auto-created) and a full copy of buttplug-mod\ (NOTES/
+  TUNING/PROFILES.txt, ButtplugBridge source) for consistency. There is
+  only ONE canonical "shareable\" package (under wifes_bedroom_win\
+  buttplug-mod\) since AddButtplugTelemetry.csx now works for either game
+  - didn't duplicate a second shareable folder under ModRoom.
+
+  (2) Built a GUI launcher (ToyLauncher.exe, WinForms, net10.0-windows,
+  self-contained single-file win-x64) per user request, so someone with
+  zero modding experience never has to touch a command line or edit JSON.
+  Source: buttplug-mod\ToyLauncher\ (MainForm.cs + Program.cs +
+  ButtplugLauncher.csproj - project folder is named ButtplugLauncher,
+  output assembly/exe is named ToyLauncher for a friendlier end-user
+  filename). What it does: dropdown of the 7 profiles (friendly display
+  names mapped to profiles.json keys - see ProfileChoices array at the top
+  of MainForm.cs), a Min%/Max% NumericUpDown pair that only appears when
+  "Custom" is selected, a "Also launch the game" checkbox, Start/Stop/
+  "Open Intiface Central" buttons, and a status log textbox. On Start: if
+  Custom is selected, rewrites ONLY the "custom" line in profiles.json via
+  a targeted regex (`"custom"\s*:\s*\{[^}]*\}`) rather than a full
+  JSON round-trip, specifically so the file's explanatory comments survive
+  (System.Text.Json would strip them on a normal serialize-back-out) -
+  this was verified directly: ran the regex against the real deployed
+  profiles.json and re-parsed the result through ButtplugBridge.exe
+  --list-profiles to confirm it still loads correctly and shows the new
+  numbers. Then it does a quick TcpClient probe of 127.0.0.1:12345 (800ms
+  timeout) to check Intiface Central is reachable, warns with a
+  Yes/No dialog if not (Yes = try to launch it, via a remembered path in
+  launcher_settings.json, guessing D:\NSFW Porn Programs\IntifaceCentral\
+  intiface_central.exe first since that's where it lives on this machine,
+  else prompts a file picker and remembers the answer). Then launches
+  ButtplugBridge.exe with `--profile <key>` (Process.Start, not redirecting
+  stdout, so ButtplugBridge keeps its own visible console window for live
+  status/troubleshooting) and, if the checkbox is on, the game exe (always
+  assumed to be "wifes_bedroom.exe" next to the launcher - true for both
+  current installs). Settings (last profile, custom min/max, launch-game
+  checkbox, remembered Intiface path) persist to launcher_settings.json
+  next to the exe, plain JSON via System.Text.Json.
+  Verification performed: full build succeeded after fixing one
+  decimal/double cast error (NumericUpDown.Value is decimal); published
+  and smoke-launched the exe standalone (process stayed alive, Responding
+  = True, correct window title via `Get-Process | Select MainWindowTitle`
+  - confirms the WinForms message loop and Load-time async Intiface probe
+  don't hang/crash); separately verified the profiles.json custom-entry
+  regex rewrite in isolation (see above) since that was the highest-risk
+  piece of new logic. Did NOT get a working screenshot of the actual
+  window layout - one blind screen-capture attempt grabbed unrelated
+  content elsewhere on the screen instead of the app window (wrong
+  approach, doesn't reliably target a specific window), so it was
+  abandoned rather than risk capturing something unintended; the layout
+  itself is simple, hand-placed fixed pixel coordinates on a small fixed
+  form (not using the WinForms Designer/.resx), so the main residual risk
+  is purely cosmetic (spacing/overlap), not functional - genuinely
+  untested visually, worth a quick look and a note back if anything looks
+  off. Deployed ToyLauncher.exe + buttplug-mod\ToyLauncher\ source to both
+  game installs, and into wifes_bedroom_win\buttplug-mod\shareable\ too.
+
+  2026-07-22 (same day, later): User said the launcher window was too
+  small. Made it resizable: FormBorderStyle Sizable (was FixedDialog),
+  MaximizeBox true, default ClientSize bumped 460x420 -> 560x520, added
+  MinimumSize 420x380 so it can't be shrunk into a broken layout. Added
+  Anchor properties so controls actually use the extra space instead of
+  staying pinned top-left when resized: profile combo/custom panel anchor
+  Left+Right (stretch horizontally), the status log textbox anchors all
+  four sides (grows both wider and taller - the main practical benefit,
+  since more room to read the connection/telemetry log was presumably the
+  actual ask). Buttons stay a fixed size, "Open Intiface Central" anchors
+  to the right edge so the row doesn't look lopsided as the window widens.
+  Tried twice to get a real screenshot of the resulting window this round
+  too (FindWindow by exact title, then Process.MainWindowHandle via
+  Start-Process -PassThru with a longer wait) - both attempts captured
+  unrelated content elsewhere on the screen rather than the actual app
+  window (once literally a different, much smaller window - the returned
+  rect was ~293x296, nowhere near the launcher's real ~560x520 size, so
+  whatever handle got resolved wasn't the right one). Gave up on
+  screenshot-based visual verification entirely rather than keep
+  attempting an unreliable technique that risks grabbing something
+  unintended off the user's screen. So: still genuinely UNVERIFIED
+  visually - confident in the resize logic because it's a standard/
+  well-understood WinForms Anchor pattern, but if anchoring behaves
+  unexpectedly in practice, the symptom would be a control not resizing
+  when it should (worth a look after this change specifically). Deployed
+  to both game installs' ToyLauncher.exe and buttplug-mod\ToyLauncher\,
+  and into wifes_bedroom_win\buttplug-mod\shareable\.
+
+  2026-07-22 (same day, again): User reported the window was resizable now
+  but buttons/text were still "bunched up". Root cause found and CONFIRMED
+  (not guessed) this time: the machine runs at 200% Windows display scaling
+  (DeviceDpi=192, confirmed via a temporary diagnostic - see below), and
+  the whole layout had been hand-positioned with raw hardcoded pixel
+  Left/Top/Width numbers with no DPI-aware sizing behind them. At 200%
+  scaling, real rendered text/controls are much bigger than a 96-DPI design
+  assumed, so fixed 8-16px gaps between them visually collapsed to nothing
+  - "bunched up" was the correct, literal description of what was
+  happening. Screenshot attempts to visually confirm this (three total
+  across this and the previous change, using progressively more careful
+  Win32 window-targeting: FindWindow, Process.MainWindowHandle, then
+  EnumWindows with exact-title matching AND a plausible-size sanity check
+  before saving) ALL failed to capture the real window - every single one
+  grabbed an unrelated ~293x296 window that happened to also be titled
+  "Toy Bridge Launcher" (still not explained; possibly a DWM/shell ghost
+  window, never chased down further). Screenshot-based visual verification
+  was abandoned entirely as unreliable in this environment/session - do
+  not retry the same approach in a future session expecting different
+  results without a genuinely different technique.
+
+  Actual fix: rewrote BuildLayout() to use a root TableLayoutPanel
+  (Dock=Fill, one column, 7 rows: 6 RowStyle.AutoSize rows for the label/
+  combo/custom-panel/checkbox/button-row/status-label, then one
+  RowStyle.Percent(100) row for the status textbox to absorb all leftover
+  space) instead of manual Left/Top/Width pixel placement + Anchor. The
+  button row is now a FlowLayoutPanel (AutoSize, WrapContents=false) so
+  buttons space themselves based on their own real rendered size (Padding
+  14,6,14,6 + AutoSize=true instead of a fixed Height/Width) rather than
+  guessed offsets. The custom Min%/Max% row is a nested FlowLayoutPanel
+  inside the custom panel, same reasoning. Every Label uses AutoSize=true.
+  This is DPI-safe by construction: AutoSize/Dock/TableLayoutPanel all
+  measure against each control's actual PreferredSize (which itself
+  already reflects the real font/DPI), so there's no baseline-pixel
+  assumption left to be wrong. Also explicitly set on the Form:
+  AutoScaleMode=Font, AutoScaleDimensions=(96,96), Font=SystemFonts.
+  MessageBoxFont (belt-and-suspenders alongside the container-based
+  layout - the WinForms Designer sets these same three by convention,
+  and this form never went through the Designer since it's built by hand
+  in code). Application-level DPI awareness was already correct via the
+  template's default `ApplicationConfiguration.Initialize()` in
+  Program.cs (PerMonitorV2 by default in .NET's WinForms SDK) - that part
+  was never the problem, only the hand-rolled child layout was.
+
+  Verification: rather than trust another screenshot, added a TEMPORARY
+  Shown-event handler that wrote the form's real ClientSize/Size/DPI/
+  Bounds and a couple of specific control sizes to a debug_size.txt file
+  next to the exe, ran it once, read that file back (NOT a screenshot -
+  a plain text file, fully reliable). Confirmed: ClientSize came out
+  exactly {560,520} as requested (proving the earlier screenshot rects
+  were never this app's real window at all), DeviceDpi=192 (confirming
+  the 200% scaling theory), _startButton.Size={100,54} and _statusBox.
+  Size={526,236} - both sane, comfortably-sized, non-bunched numbers. The
+  diagnostic code was then removed before final build (it is NOT in the
+  shipped version - if a debug_size.txt ever appears next to ToyLauncher
+  .exe in the future, that means someone re-added similar temporary code
+  and forgot to remove it, not that it's expected behavior). If layout
+  still looks off after this change, the useful next diagnostic step is
+  this same file-logging trick (reliable), not another screenshot attempt
+  (repeatedly proven unreliable in this environment this session).
+  Deployed to both installs' ToyLauncher.exe + buttplug-mod\ToyLauncher\
+  MainForm.cs, and into wifes_bedroom_win\buttplug-mod\shareable\.
+
+  2026-07-22 (same day, big one): User wants to ship this to other people
+  to test on a different PC. Three things done.
+
+  (1) DECLINED to bundle the actual game(s) in an installer - flagged this
+  clearly to the user rather than building it. Wife's Bedroom / ModRoom are
+  copyrighted third-party (Patreon-funded) content; redistributing them via
+  an installer, regardless of how the installer is packaged, would be
+  distributing copyrighted adult content without the creators' permission.
+  User agreed a "tooling only" installer (Intiface Central + Launcher +
+  Bridge, no game files, person supplies their own game) was fine. If a
+  future session is asked to add game files to the installer, don't - same
+  reasoning as the earlier decision not to put the game in shareable\.
+
+  (2) Genericized ToyLauncher - it no longer hardcodes "wifes_bedroom.exe".
+  Added `GamePath` to LauncherSettings (launcher_settings.json). New
+  resolution order in `ResolveGameExePath(bool allowPrompt)`: (a) use
+  saved GamePath if it still exists, (b) auto-detect by scanning the
+  launcher's own folder for *.exe files that aren't ButtplugBridge.exe/
+  ToyLauncher.exe - if exactly one candidate, use and remember it
+  silently (keeps the old two-installs' behavior working with zero
+  changes, since the game exe happens to sit right next to the launcher
+  there), (c) otherwise, if prompting is allowed, open a file picker and
+  remember the choice. Added a "Game:" row at the top of the UI (path
+  label + Browse... button) so this is never hidden/implicit. Game launch
+  now uses Path.GetDirectoryName(gamePath) as its WorkingDirectory instead
+  of always _baseDir, since the game and the launcher/bridge no longer
+  have to be co-located at all - this was an intentional architecture
+  shift: going forward, the launcher+bridge can live in ONE shared
+  install location (e.g. installed once via the installer) and be pointed
+  at any number of different game installs elsewhere on disk, rather than
+  needing a separate copy of the tools dropped into every game folder.
+  The two existing installs (wifes_bedroom_win\, ModRoom V3.2\) were NOT
+  migrated to this new shared-location model - they still have their own
+  co-located copies, which still work fine via the auto-detect path
+  above. Migrating them to a single shared install is a possible future
+  cleanup, not done this round.
+
+  (3) Added one-click in-app patching so a second person never has to
+  touch UndertaleModTool or a command line at all - this wasn't explicitly
+  requested but was flagged to the user as necessary for "easy for
+  someone else" to actually be true, and they didn't push back. New file
+  buttplug-mod\ToyLauncher\GamePatcher.cs: a `static class GamePatcher`
+  with `CheckStatus(path)` (read-only compatibility/already-patched
+  check) and `Patch(path)` (the actual patch - byte-identical marker/
+  insert logic to AddButtplugTelemetry.csx and the old utmt-tool
+  `markerpatch` command, just embedded as C# instead of a .csx or a
+  separate console tool). ButtplugLauncher.csproj now references
+  UndertaleModLib.dll/Underanalyzer.dll/Newtonsoft.Json.dll the same way
+  the old utmt-tool project did (HintPath into E:\Downloads\
+  UndertaleModTool_v0.9.1.2-Windows\, Private=true so they get bundled
+  into the self-contained single-file publish - confirmed this works,
+  exe size went 116MB -> 131.6MB, published fine, launched fine). New UI:
+  a "Patch Game..." button next to "Browse..." in the Game row; on click,
+  resolves the game path (prompting if needed), looks for data.win next
+  to it, confirms with the user before touching anything, then runs
+  GamePatcher.Patch on a background thread (Task.Run, to keep the UI
+  responsive) and reports the result via both the status log and a
+  MessageBox. VERIFIED properly this time (not just "looks right"): built
+  a throwaway standalone console test project (same UndertaleModLib
+  references, copied in GamePatcher.cs directly since it's not public)
+  against the ORIGINAL PRISTINE unpatched data.win backup (still had it
+  from the very first session - G:\Temp\...\scratchpad\work\data.win),
+  ran CheckStatus -> Patch -> CheckStatus -> Patch-again in sequence, and
+  got exactly the right answers at each step (Compatible=true/
+  AlreadyPatched=false before, Patched after, AlreadyPatched=true on
+  checking again, idempotent no-op on re-patching). This is the same
+  verification rigor as the original manual patch got, just via the
+  embedded code path instead of the standalone tool.
+
+  Also built an Inno Setup installer (chose Inno Setup over a custom .NET
+  installer app per user's explicit preference). New folder
+  buttplug-mod\installer\: ToyBridgeLauncher.iss (the script),
+  after_install.txt (shown on the finish page - tells the user to Browse
+  + Patch Game after install, since the installer itself can't know what
+  game they have), stage\ (staged copies of ToyLauncher.exe,
+  ButtplugBridge.exe, and Intiface Central's official win-x64 installer -
+  reused the v3.1.0+42 copy already downloaded/cached earlier this
+  project rather than re-fetching, after confirming via the GitHub API
+  that it's still the latest release), INSTALLER.txt (how to rebuild it,
+  including the exact silent-install command line to test without
+  disturbing this dev machine's own already-installed Intiface Central).
+  Installer specifics: installs to %LocalAppData%\Programs\
+  ToyBridgeLauncher by default (PrivilegesRequired=lowest - no admin/UAC
+  needed, matters for "someone else's PC" testing), has a checkbox task
+  to also silently run the bundled Intiface Central installer (same
+  /VERYSILENT /SUPPRESSMSGBOXES /NORESTART flags already proven to work
+  earlier this session when updating Intiface Central by hand - confirmed
+  it's Inno-Setup-based too), Start Menu + optional desktop shortcut,
+  launches ToyLauncher.exe automatically at the end (skippable), and
+  cleans up profiles.json/launcher_settings.json on uninstall. Inno Setup
+  6.7.3 itself was not installed on this machine - installed via
+  `winget install --id JRSoftware.InnoSetup`; ISCC.exe ended up at
+  C:\Users\p10gr\AppData\Local\Programs\Inno Setup 6\ISCC.exe (NOT under
+  Program Files, worth remembering if this needs to be found again).
+  Compiled output: ~80.9MB (down from ~223MB of staged files combined,
+  thanks to Inno's lzma2 compression). VERIFIED via a real silent
+  install: ran the actual compiled ToyBridgeLauncher-Setup.exe with
+  /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /TASKS= (empty TASKS
+  deliberately deselects the Intiface Central checkbox, which defaults
+  to checked - this was specifically to avoid touching this dev
+  machine's real, already-working Intiface Central install during
+  testing) /DIR=<scratch path> /NOICONS, confirmed ButtplugBridge.exe +
+  ToyLauncher.exe + the uninstaller landed correctly, then launched the
+  installed ToyLauncher.exe directly from that install location and
+  confirmed it started (Responding=True, correct title) and correctly
+  wrote launcher_settings.json there. Did NOT separately re-test the
+  Intiface Central sub-install path in this installer specifically (only
+  tested that exact command line manually, standalone, earlier in the
+  project) - if that ever needs re-verifying, the safe way is the same
+  /TASKS= trick in reverse (explicitly include installintiface) pointed
+  at a scratch /DIR, not a live install on a machine that already has
+  Intiface Central set up how the user wants it.
+
+  Final artifact for handing to someone else to test on another PC:
+  buttplug-mod\shareable\ToyBridgeLauncher-Setup.exe (also mirrored the
+  whole shareable\ folder's contents - exes, source, installer project -
+  since the compiled installer alone doesn't include a way to rebuild
+  itself). shareable\README.txt was rewritten to lead with "run the
+  installer" as the primary path, with the old manual UndertaleModTool
+  route demoted to an explicitly-labeled alternative for people who'd
+  rather not use the Launcher's built-in patcher.
+
+  2026-07-22 (later still): Someone testing this doesn't have Windows
+  (Linux). User asked whether to add Linux/macOS support for "both
+  programs" (ButtplugBridge + the patching capability - NOT the WinForms
+  GUI, which is Windows-only tech and can't be ported without a full
+  rewrite in a different UI framework; agreed with user to skip that for
+  now since it sounds like one person needs this, and command-line-only
+  is enough).
+
+  Ground truth established mid-task: the user's Linux tester sent a
+  shell launcher script (`LD_LIBRARY_PATH="$SCRIPT_DIR/lib:$LD_LIBRARY_PATH"
+  "$SCRIPT_DIR/wifes_modroom"`) - the standard wrapper pattern for a
+  GameMaker NATIVE Linux export. This means at least some Linux users may
+  already have a genuine native Linux build of the game (not just the
+  Windows exe), with its data file typically named game.unx instead of
+  data.win - UndertaleModLib/UndertaleModTool already support that format
+  (their own README explicitly lists data.win/game.ios/game.unx as
+  supported), so patching should work identically regardless of which
+  format it is. Never got the actual `ls -la` output back from the user
+  to confirm the exact filename in their case - if a future session picks
+  this up, that's the first thing to check before assuming which resolver
+  path (see below) will fire.
+
+  (1) ButtplugBridge.csproj: changed `<RuntimeIdentifier>win-x64</RuntimeIdentifier>`
+  (singular) to `<RuntimeIdentifiers>win-x64;linux-x64;osx-x64;osx-arm64</RuntimeIdentifiers>`
+  (plural) - this is what lets `dotnet publish -r <rid>` target any of the
+  four without needing separate project files. Verified nothing in
+  Program.cs was Windows-specific to begin with (plain UdpClient,
+  System.Net.WebSockets via the Buttplug library, Console, System.Text.Json
+  - no P/Invoke, no WinForms) - so zero code changes needed, purely a
+  project-file/publish-target change. Published all four RIDs
+  successfully (win-x64 re-verified as a sanity check that the change
+  didn't break the existing working build).
+
+  (2) New project: buttplug-mod\GamePatcherCli\ (GamePatcher.cs +
+  Program.cs + GamePatcherCli.csproj, same RuntimeIdentifiers/self-
+  contained/single-file setup as ButtplugBridge, same UndertaleModLib/
+  Underanalyzer/Newtonsoft.Json HintPath references as ToyLauncher). This
+  is the cross-platform, command-line equivalent of ToyLauncher's "Patch
+  Game..." button - GamePatcher.cs itself is a byte-identical copy of
+  ToyLauncher's GamePatcher.cs (just namespace changed ButtplugLauncher ->
+  GamePatcherCli), since that class never had any WinForms/Windows
+  dependency to begin with - it's pure UndertaleModLib file I/O. Program.cs
+  wraps it: `GamePatcher <path> [--yes] [--check]`, where <path> can be
+  either the data file directly (sniffed via its "FORM" magic-byte header,
+  not filename/extension - so data.win/game.unx/game.ios all work
+  transparently) or the game's exe/launcher-script (in which case it
+  looks for data.win/game.unx/game.ios/game.droid sitting next to it).
+  Output assembly named "GamePatcher" (not GamePatcherCli) for a cleaner
+  CLI invocation. osx-arm64 build produced one benign warning (CS8012,
+  "referenced assembly targets a different processor") from referencing
+  the x64-flagged UndertaleModLib.dll from an arm64 target - expected and
+  harmless for a pure-IL managed assembly with no native interop (JIT
+  compiles for the real target regardless of the reference's declared
+  processor flag); did not attempt to silence the warning since it's
+  informational and build still succeeds.
+
+  VERIFIED FOR REAL, not just "compiles": this machine has WSL with
+  Ubuntu-22.04 installed, so both the linux-x64 GamePatcher and
+  linux-x64 ButtplugBridge were actually copied in and run under real
+  Linux (via `wsl.exe -d Ubuntu-22.04 -- bash -c "..."`, paths translated
+  to /mnt/g/... since WSL can see Windows drives there). Confirmed:
+  chmod +x needed (as expected, download/copy doesn't preserve the exec
+  bit - documented in LINUX-MACOS.txt's troubleshooting section);
+  GamePatcher on a copy of the pristine unpatched data.win backup
+  correctly reported Compatible=true/AlreadyPatched=false, then patched
+  successfully with a real .bak backup, then correctly reported
+  AlreadyPatched=true on both --check and a plain re-run (safe no-op);
+  ButtplugBridge --list-profiles created profiles.json correctly;
+  ButtplugBridge --verbose against an unreachable Intiface Central showed
+  the same graceful "not connected, retrying in 5s" loop as the Windows
+  build (confirms System.Net.WebSockets / the Buttplug client library
+  behave the same cross-platform, no platform-specific exception).
+  osx-x64/osx-arm64 builds were NOT run on real hardware (no Mac
+  available anywhere in this environment) - compiled clean, that's the
+  extent of verification for those two. If a Mac tester reports a
+  problem, start there.
+
+  Deployed cross-platform\<rid>\{ButtplugBridge,GamePatcher} (no file
+  extension, standard for Linux/macOS executables) to both game installs'
+  buttplug-mod\ and into wifes_bedroom_win\buttplug-mod\shareable\.
+  Source for GamePatcherCli also copied to buttplug-mod\GamePatcherCli\ in
+  both installs + shareable\. New guide: LINUX-MACOS.txt (mirrors the
+  plain-language style of the other guides) - covers the chmod +x step,
+  the "you might already have a native build" possibility, the Wine/
+  CrossOver fallback for Windows-only builds (untested - no Linux/macOS
+  machine with Wine available to verify against), and an honest
+  "VERIFIED SO FAR" section at the bottom stating exactly what was and
+  wasn't actually tested, matching the transparency pattern used
+  throughout this whole project rather than implying more confidence than
+  is warranted. shareable\README.txt got a pointer at the top directing
+  Linux/macOS readers to LINUX-MACOS.txt instead of the Windows-only
+  instructions that follow.
+
+  NOT DONE this round, explicitly out of scope per discussion with user:
+  a cross-platform GUI (would need a full rewrite in something like
+  Avalonia UI instead of WinForms - WinForms itself is Windows-only and
+  cannot be made to run on Linux/macOS, this is a hard platform
+  limitation, not a configuration issue). If more non-Windows users show
+  up wanting a GUI, that's the next thing to reconsider, but command-line
+  GamePatcher + ButtplugBridge is the full feature set otherwise - nothing
+  the Windows GUI does is unavailable on Linux/macOS now, just not
+  GUI-wrapped.
+
+  2026-07-22 (Android investigation): User found E:\Downloads\wifes_bedroom.apk
+  and asked about a fully phone-only ("no PC") setup. This turned into real
+  hands-on testing, not just theorizing - this machine unexpectedly had a
+  full Android SDK already installed (C:\Users\p10gr\AppData\Local\Android\Sdk,
+  build-tools 36.0.0, an AVD "Medium_Phone_API_36.0" - x86_64, API 36,
+  google_apis_playstore) plus JDK (keytool/jar), so a lot of this got
+  ACTUALLY VERIFIED rather than assumed. Findings, good and bad:
+
+  CONFIRMED GOOD: wifes_bedroom.apk is a genuine GameMaker native Android
+  export (lib/arm64-v8a/libyoyo.so confirms it, not a hack), data file is
+  assets/game.droid (not data.win - GamePatcher already handled this via
+  its FORM-header sniff, no code changes needed). GamePatcher --check
+  confirmed it's the same oFutaMatingPress structure, compatible. Manifest
+  already declares android.permission.INTERNET (checked by grepping the
+  binary AXML for the UTF-16LE string, since decoding AXML properly needs
+  more tooling than was worth building for a one-off check).
+
+  FULLY PATCHED, REPACKAGED, RESIGNED, AND RUN FOR REAL - this is the
+  headline result: extracted assets/game.droid, ran GamePatcher on it
+  (same tool/logic as every other platform), reinserted it into the APK
+  with `jar uf` (preserves the assets/ path, unlike `zip -j`), stripped
+  the old META-INF/{CERT.SF,CERT.RSA,MANIFEST.MF} signature files (this
+  step matters - resigning over stale signature files works but is
+  sloppy/non-standard), zipaligned and signed with a fresh debug keystore
+  via build-tools' zipalign.exe/apksigner.bat (apksigner verify confirmed
+  v1/v2/v3 all true). Installed on the AVD via adb install - worked.
+  Launched via `adb shell am start -n aplove.aplovvare.bedroom/.RunnerActivity`
+  (that's the real package name - obfuscated-looking, not "wifes_bedroom"
+  or similar) - and it GENUINELY RAN: logcat showed the exact same
+  Game_Prepare/Script_Prepare/.../Entering main loop sequence seen on
+  every other platform this project has touched, process stayed alive,
+  no crash. This means: patch + resign + install + launch all work on a
+  real (if emulated) Android runtime, not just "compiles." Artifacts are
+  in G:\Temp\...\scratchpad\apk_patch\ this session (NOT yet copied
+  anywhere permanent - scratchpad is ephemeral, a future session
+  continuing this should re-derive rather than assume those files still
+  exist). The debug keystore (toybridge-debug.keystore, password
+  "toybridge123" for both store and key) is also only in that scratchpad
+  location - would need regenerating or persisting somewhere real before
+  this becomes an actual deliverable.
+
+  CORRECTED A WRONG ASSUMPTION about ButtplugBridge-on-Android: the plan
+  going in was "just publish for linux-bionic-arm64, run it in Termux,
+  same as the other Linux/macOS builds." This RID DOES exist and DOES
+  compile (produces a real ARM64 Bionic-linked ELF, confirmed via `file`)
+  - but running it revealed ".NET location: Not found", i.e. NOT actually
+  self-contained despite --self-contained true. Root cause (traced via
+  the NuGet package contents, not guessed): Microsoft.NETCore.App.Runtime.
+  linux-bionic-arm64's "native" folder only contains Mono headers
+  (mono-2.0/*.h) - this runtime pack is built for the .NET-for-Android/
+  MAUI app-embedding model (Mono runtime baked into an APK), NOT for
+  CoreCLR standalone-executable self-contained publish the way every
+  other RID in this project works. There is currently no real "just copy
+  a self-contained console binary into Termux" path via this RID.
+  WORKAROUND (built, NOT yet tested - no way to run glibc-on-Bionic in
+  this environment): switched ButtplugBridge.csproj's RuntimeIdentifiers
+  from linux-bionic-arm64 to plain linux-arm64 (standard glibc ARM64,
+  same family as Raspberry Pi etc.) - this one publishes as a REAL
+  self-contained binary (81.7MB, matches the size of the other working
+  RIDs, `file` confirms /lib/ld-linux-aarch64.so.1 interpreter = genuine
+  glibc, not bionic). This needs Termux's `proot-distro` (install a real
+  glibc Linux distro - Debian/Ubuntu - inside Termux via
+  `pkg install proot-distro && proot-distro install ubuntu`) rather than
+  running directly in Termux's native (Bionic) shell. This is a known,
+  common, well-documented Termux pattern for exactly this class of
+  problem (any glibc-only software), but it IS more setup than "one
+  binary, one chmod, one run" - worth being upfront about that with
+  whoever ends up using this. GamePatcher was NOT rebuilt for
+  linux-arm64/dropped bionic-arm64 support this round (patching is a
+  one-time step normally done on a PC before the APK is sideloaded, so
+  an ARM64 build of the patcher itself isn't obviously needed - revisit
+  if someone specifically wants to patch FROM their phone).
+
+  COULD NOT VERIFY: Intiface Central's Android app. Installed fine, but
+  CRASHED IMMEDIATELY on launch - logcat: UnsatisfiedLinkError, dlopen
+  failed, "librust_lib_intiface_central.so" not found. Root cause: its
+  APK only bundles the core app/engine native libraries (libapp.so,
+  libflutter.so, and apparently this rust lib) for arm64-v8a and
+  armeabi-v7a - the x86_64 slice only has a few secondary libs (dartjni,
+  sentry), not the real engine. So this specific AVD (x86_64) cannot run
+  Intiface Central's Android app at all, full stop - this isn't a
+  translation-layer nuance, the library genuinely isn't there for that
+  architecture. Curiously the GAME's single arm64-v8a-only native lib
+  (libyoyo.so) DID work on this same x86_64 AVD (see above) - never
+  fully explained why one arm64-only native lib loaded fine while
+  Intiface's arm64-only libraries didn't; possibly something about how
+  GameMaker's runner loads its native lib vs. how the Flutter engine
+  loads its native lib, not chased down further given time already
+  spent. Bottom line: the one thing that could NOT be checked in this
+  environment is exactly the piece that determines whether the "no PC"
+  architecture (game + Termux/proot ButtplugBridge + Intiface Central,
+  all talking over 127.0.0.1 on the same device) actually works -
+  specifically, whether Intiface Central runs correctly on REAL Android
+  hardware (very plausibly fine - real phones are almost universally
+  arm64-v8a and that's the architecture with full library support - this
+  x86_64 emulator limitation likely doesn't apply to an actual phone) and
+  whether loopback UDP/WebSocket traffic is genuinely shared between
+  separate apps on stock Android (still an unverified assumption -
+  reasoned to be very likely true based on how Android's network stack
+  works, but never empirically confirmed either way this session).
+
+  STATUS: paused here to report back to the user rather than continuing
+  to build out full end-user packaging/documentation for a "no PC"
+  pipeline that turned out meaningfully more involved (proot-distro
+  setup) than the Linux/macOS work, with one still-open unknown
+  (Intiface Central + loopback on real hardware) that only real-device
+  testing can resolve. If resumed: the patched/signed APK proves the
+  game-side patch works end-to-end; the open items are (a) persist the
+  patch+sign toolchain/keystore somewhere durable instead of scratchpad,
+  (b) write LINUX-MACOS.txt-style docs for the proot-distro path once/if
+  the user confirms they still want this, (c) get real-device
+  confirmation of Intiface Central + loopback sharing before promising
+  the full pipeline works.
+
+  2026-07-22 (Android, continued): User confirmed from personal experience
+  that Intiface Central works fine on their real phone - that resolves the
+  one open unknown from the entry above, so this was packaged up properly.
+
+  Built buttplug-mod\ApkPatcher\ - a new tool that fully automates what was
+  previously a manual multi-tool pipeline (jar/zipalign/apksigner by hand).
+  ApkPatcher.exe <path-to.apk> [--out x] [--yes]:
+    1. Opens the APK via System.IO.Compression.ZipArchive (pure managed
+       code, no external `jar`/`zip` tool needed for this part, unlike the
+       first manual pass which used the JDK's `jar uf`).
+    2. Finds the game's data file by scanning entries under assets/ for
+       the "FORM" magic header (same technique as GamePatcherCli's
+       exe-vs-data-file resolver) rather than assuming a filename - so
+       assets/game.droid, assets/data.win, etc. all work unmodified.
+    3. Extracts it to a temp file, runs the EXACT SAME GamePatcher.Patch
+       used everywhere else in this project (GamePatcher.cs is copied
+       into this project too now, third copy - ToyLauncher, GamePatcherCli,
+       ApkPatcher all carry an identical copy; consider consolidating via
+       an MSBuild <Compile Include> link if this needs touching again,
+       wasn't worth the complexity for a one-off addition this round).
+    4. Reinserts the patched file into a COPY of the APK (original is
+       never modified - opens the copy in ZipArchiveMode.Update), and
+       strips the stale META-INF/{*.SF,*.RSA,*.DSA,*.EC,MANIFEST.MF}
+       signature files (also pure ZipArchive code now, replacing the
+       manual Python zipfile script from the first pass).
+    5. Generates a signing keystore on first use (via `keytool -genkeypair`,
+       random 16-byte hex password, saved next to the keystore in a
+       `apkpatcher.keystore.pass` file so subsequent runs reuse the same
+       key instead of generating a new one every time - matters because a
+       consistent signing identity across patches means Android treats
+       repeated patches of updated APKs as upgradable rather than
+       signature-mismatched every time).
+    6. Signs via `java -jar apksigner.jar sign ...` - apksigner.jar
+       (1.1MB, self-contained incl. conscrypt for crypto - confirmed via
+       `java -jar apksigner.jar --version` working standalone, i.e. does
+       NOT need the rest of the Android SDK, just a JDK) is bundled
+       alongside the tool (copied in via csproj <None> item, though note:
+       CopyToPublishDirectory did NOT actually work for PublishSingleFile
+       output - the jar landed in bin\...\<rid>\ but not bin\...\<rid>\
+       publish\ - worked around by just manually copying it into each
+       publish\ folder after every `dotnet publish`; if this needs
+       rebuilding, remember that step, don't assume the csproj handles it).
+    Deliberately SKIPPED zipalign - it's a Play Store publish requirement
+    and a minor mmap-efficiency optimization, not something `pm install`/
+    adb sideloading actually requires. Removing this dependency meant
+    ApkPatcher doesn't need any Android SDK build-tools at all, only a
+    JDK - confirmed this assumption by testing: the zipalign-skipped,
+    ApkPatcher-signed APK installed and ran fine (see below).
+
+  VERIFIED END TO END, fully automated this time (no manual jar/zipalign/
+  apksigner steps): ran `ApkPatcher.exe wifes_bedroom.apk --yes` against a
+  fresh copy of the real APK. It found assets/game.droid automatically,
+  patched it, generated a new keystore, signed, and produced
+  wifes_bedroom-toybridge.apk. `apksigner verify` confirmed v1/v2/v3 all
+  true (same as the manual pass). Booted the Android emulator again
+  (Medium_Phone_API_36.0), adb installed this fully-automated output,
+  launched aplove.aplovvare.bedroom/.RunnerActivity, and logcat showed
+  the identical Game_Prepare/.../Entering main loop sequence with no
+  crash - proving the automated tool produces an equivalently-working
+  result to the hand-done pipeline from the earlier entry.
+
+  Also fixed the ButtplugBridge-on-Android question properly this time:
+  ButtplugBridge.csproj's RuntimeIdentifiers permanently changed from
+  linux-bionic-arm64 (confirmed broken for this use case - Mono-only
+  runtime pack, see the entry above) to linux-arm64 (confirmed working -
+  genuine self-contained glibc ARM64 binary, ~81.7MB matching every other
+  working RID's ballpark size). This needs Termux's proot-distro (a real
+  Ubuntu/Debian environment inside Termux) rather than running directly
+  in Termux's native shell - documented clearly as an extra setup step,
+  not glossed over. Built and deployed cross-platform\linux-arm64\
+  ButtplugBridge (only ButtplugBridge - GamePatcher/ApkPatcher don't need
+  an on-phone build since patching is a one-time PC-side step).
+
+  New guide: ANDROID.txt (buttplug-mod\ + shareable\), same plain-language
+  style as the other guides, explicitly split into "verified for real"
+  (the patch/install/launch pipeline) vs. "believed to work, not watched
+  start-to-finish" (Termux/proot-distro -> Intiface Central -> toy over
+  loopback) - keeping that distinction honest rather than presenting
+  everything as equally confirmed, consistent with how every other
+  cross-platform claim in this project has been caveated.
+
+  Deployed to both installs' buttplug-mod\ (ApkPatcher.exe + apksigner.jar
+  at the buttplug-mod root, buttplug-mod\ApkPatcher\ source, updated
+  cross-platform\ with ApkPatcher+apksigner.jar added to the linux-x64/
+  osx-x64/osx-arm64 folders and a new linux-arm64\ folder for the
+  Termux/proot ButtplugBridge) and into wifes_bedroom_win\buttplug-mod\
+  shareable\. NOTE: the patched/signed test APK itself
+  (wifes_bedroom-toybridge.apk) and the throwaway debug keystores used
+  during testing were NOT copied anywhere permanent - they're
+  intentionally not deliverables (we don't ship patched game files, per
+  the standing policy against redistributing the game - ApkPatcher is the
+  deliverable, not its output on this specific test run) and remain only
+  in G:\Temp\...\scratchpad\ this session if they're ever needed for
+  reference, which will not survive to a future session.
+
+
+THE ONE-SENTENCE VERSION
+-------------------------
+The game's data.win was patched to broadcast its live "thrust" animation
+value over local UDP; a separate companion program (ButtplugBridge.exe)
+listens for that and drives Buttplug.io/Intiface Central toys accordingly.
+
+
+WHY IT'S BUILT THIS WAY
+------------------------
+Wife's Bedroom ships as a compiled GameMaker game - only data.win + the exe
+were available, no .yyp source project. So this was done by decompiling the
+relevant code with UndertaleModTool, patching it, and recompiling.
+
+The Buttplug.io protocol itself (WebSocket + JSON-RPC-ish messages) is NOT
+implemented inside the game's GML. That would have required wiring a new
+Async-Networking event into the compiled object, which means guessing
+internal GameMaker event-subtype IDs with no reliable way to verify short of
+trial-and-error rebuilds - too risky/fragile. Instead:
+
+  - The game does the ONE thing that's safe and simple in GML: fire-and-
+    forget UDP send (no handshake, no async event needed) of its existing
+    "thrust" value, throttled to ~30/sec.
+  - A separate companion .exe (ButtplugBridge) - ordinary, easily-editable
+    C# - does all the actual Buttplug protocol work: connecting to Intiface
+    Central, device discovery, mapping thrust telemetry to vibration
+    intensity / stroke position, sending commands.
+
+This also means retuning the "feel" never requires touching data.win again -
+just edit and rebuild ButtplugBridge.
+
+
+WHERE THE GAME'S THRUST MECHANIC LIVES
+----------------------------------------
+Everything for this game's sex minigame lives in ONE object:
+oFutaMatingPress (it's effectively the whole game's controller object, not
+just this scene - title screen, save/load, dialogue, etc. all live in its
+Create/Step/Draw events too). Only 62 total code entries exist in this game
+(it's a small project), so there wasn't much to search.
+
+Key instance variables (all declared in gml_Object_oFutaMatingPress_Create_0):
+  thrust           - current penetration/animation position, 0..1, smoothed
+  thrust_prev       - previous frame's thrust (used for jiggle physics)
+  thrust_set        - this frame's TARGET thrust (oscillates via cosine)
+  thrust_time       - phase accumulator, += thrust_speed every Draw call
+  thrust_speed      - how fast the thrust cycle oscillates (default 2,
+                       randomized 3-16 depending on game state/pill effects)
+  thrust_strength   - amplitude of the oscillation / lerp speed multiplier
+  thrust_middle     - center point of the oscillation
+  insert            - bool, whether currently "inserted" (scene active)
+  orgasm            - bool, true during the orgasm animation
+
+The actual per-frame computation (in gml_Object_oFutaMatingPress_Draw_0,
+around line 680-896 in decompiled form - line numbers shift slightly with
+decompiler version, search for these instead):
+
+  thrust_set = thrust_middle + (dcos(thrust_time) * (0.25 * thrust_strength))
+  ... (orgasm/knot/edge special-casing clamps thrust_set) ...
+  thrust += (thrust_set - thrust) * (thrust_lerp * thrust_strength)   <- the actual smoothing step
+  balls_jiggle -= (thrust - thrust_prev) / 8
+  thrust_prev = thrust                                                <- OUR PATCH GOES RIGHT AFTER THIS LINE
+  ...
+  thrust_time += thrust_speed
+
+
+THE EXACT PATCH
+-----------------
+Two insertions, both additive (nothing removed or altered):
+
+1) In gml_Object_oFutaMatingPress_Create_0, right after the line
+   "thrust_time = 0;", inserted:
+
+     buttplug_socket = network_create_socket(network_socket_udp);
+     buttplug_buffer = buffer_create(256, buffer_grow, 1);
+     buttplug_last_send = 0;
+     buttplug_port = 45735;
+
+2) In gml_Object_oFutaMatingPress_Draw_0, right after the line
+   "thrust_prev = thrust;", inserted:
+
+     if (buttplug_socket >= 0)
+     {
+         var _bp_now = current_time;
+         if (_bp_now - buttplug_last_send >= 33)
+         {
+             buttplug_last_send = _bp_now;
+             var _bp_insert = 0;
+             if (insert) { _bp_insert = 1; }
+             var _bp_orgasm = 0;
+             if (orgasm) { _bp_orgasm = 1; }
+             var _bp_msg = string(thrust) + "," + string(thrust_prev) + "," + string(thrust_speed) + "," + string(thrust_strength) + "," + string(_bp_insert) + "," + string(_bp_orgasm);
+             buffer_seek(buttplug_buffer, buffer_seek_start, 0);
+             buffer_write(buttplug_buffer, buffer_text, _bp_msg);
+             network_send_udp_raw(buttplug_socket, "127.0.0.1", buttplug_port, buttplug_buffer, buffer_tell(buttplug_buffer));
+         }
+     }
+
+This sends a plain-text UDP packet to 127.0.0.1:45735, ~30x/second, whenever
+the object is drawing (i.e. basically always while the game is running - not
+gated on "insert", just throttled by time). Format:
+  thrust,thrust_prev,thrust_speed,thrust_strength,insert(0/1),orgasm(0/1)
+
+This exact patch, in reapplicable script form, is saved as
+AddButtplugTelemetry.csx in this folder (and in shareable/) - see
+"RE-APPLYING THE PATCH" below.
+
+
+THE COMPANION APP: ButtplugBridge
+------------------------------------
+Source: buttplug-mod\ButtplugBridge\Program.cs (+ .csproj)
+Deployed: D:\NSFW Games\wifes_bedroom_win\ButtplugBridge.exe (self-contained,
+          built via `dotnet publish -c Release -r win-x64 --self-contained
+          true` targeting net10.0/win-x64)
+NuGet dependency: Buttplug 5.0.1 (official C# client, from nuget.org)
+
+What it does:
+  1. Binds a UDP listener on 127.0.0.1:45735, parses incoming telemetry.
+  2. Connects to Intiface Central at ws://127.0.0.1:12345 (retries every 5s
+     if not reachable), then calls StartScanningAsync.
+  3. ~30x/sec control loop:
+     - If no telemetry received in the last 500ms, stop all devices (scene
+       ended / game not running) and idle.
+     - Otherwise: delta = |current thrust - previous SAMPLE's thrust| (this
+       is computed bridge-side across received samples, not from the game's
+       own thrust_prev field, so it's independent of the throttle interval).
+       targetVibe = clamp(delta * VibeDeltaScale, 0, 1).
+       During orgasm: targetVibe is floored to OrgasmFloor plus a sine pulse
+       (OrgasmPulseAmplitude @ OrgasmPulseHz).
+       smoothedVibe is an exponential moving average of targetVibe (rate =
+       VibeSmoothing) to avoid jitter.
+       strokePos = clamp(thrust, 0, 1); stroke duration is derived from
+       thrust_speed (faster in-game rhythm -> shorter stroke duration),
+       clamped to [MinStrokeDurationMs, MaxStrokeDurationMs].
+  4. For each connected device: if it supports Vibrate/Oscillate output,
+     sends the vibe intensity; if it supports Position/HwPositionWithDuration
+     (e.g. The Handy), sends the stroke position+duration.
+
+ALL the tunable feel constants are named consts right at the top of
+Program.cs's Main (before the UDP listener starts):
+  VibeDeltaScale, VibeSmoothing, OrgasmFloor, OrgasmPulseAmplitude,
+  OrgasmPulseHz, MinStrokeDurationMs, MaxStrokeDurationMs,
+  TelemetryTimeoutMs, ControlHz
+
+TO RETUNE: edit those consts in
+  D:\NSFW Games\wifes_bedroom_win\buttplug-mod\ButtplugBridge\Program.cs
+then rebuild:
+  cd "D:\NSFW Games\wifes_bedroom_win\buttplug-mod\ButtplugBridge"
+  dotnet publish -c Release -r win-x64 --self-contained true
+then copy the resulting exe (in bin\Release\net10.0\win-x64\publish\) over
+  D:\NSFW Games\wifes_bedroom_win\ButtplugBridge.exe
+(No data.win changes needed for this - the telemetry format never changes,
+only how the bridge interprets it.)
+
+Buttplug C# client 5.0.1 API notes (in case this needs touching):
+  - Namespace: Buttplug.Client, Buttplug.Core.Messages
+  - Connect: new ButtplugClient(name); await client.ConnectAsync(new
+    ButtplugWebsocketConnector(new Uri("ws://127.0.0.1:12345")), token);
+  - Device output uses the newer generic "Output" model (not the old
+    ScalarCmd/LinearCmd/VibrateCmd names you'll find in older docs):
+      device.HasOutput(OutputType.Vibrate / .Oscillate / .Position /
+                        .HwPositionWithDuration / etc.)
+      await device.RunOutputAsync(DeviceOutput.Vibrate.Percent(0.0..1.0), token)
+      await device.RunOutputAsync(DeviceOutput.PositionWithDuration.Percent(0.0..1.0, durationMs), token)
+    Percent() takes 0.0-1.0 (NOT 0-100) - confirmed by decompiling the
+    library with ilspycmd since there's no XML doc on nuget for this
+    package's exact version.
+
+
+REQUIRED TOOLING (if any of this needs to be redone)
+-------------------------------------------------------
+  - .NET 10 SDK - was NOT installed on this machine originally; installed
+    via `winget install --id Microsoft.DotNet.SDK.10`. Needed both to build
+    ButtplugBridge and to run UndertaleModLib-based tooling headlessly.
+  - UndertaleModTool v0.9.1.2 (GUI build) - found already present at
+    E:\Downloads\UndertaleModTool_v0.9.1.2-Windows\. Needs .NET 10 desktop
+    runtime to launch its GUI (wasn't installed either, but we avoided the
+    GUI entirely - see below).
+  - Everything was actually done HEADLESSLY by writing small C# console
+    programs that reference UndertaleModLib.dll / Underanalyzer.dll
+    directly (both live in the UndertaleModTool folder above) rather than
+    using the GUI or its .csx script runner. This is fully scriptable:
+      UndertaleData data = UndertaleIO.Read(fileStream);
+      var globalContext = new UndertaleModLib.Decompiler.GlobalDecompileContext(data);
+      var settings = data.ToolInfo.DecompilerSettings;
+      string gml = new Underanalyzer.Decompiler.DecompileContext(globalContext, codeEntry, settings).DecompileToString();
+      // ...edit the string...
+      var importGroup = new UndertaleModLib.Compiler.CodeImportGroup(data) { AutoCreateAssets = false };
+      importGroup.QueueReplace("gml_Object_..._Draw_0", newGmlText);
+      importGroup.Import();  // compiles + writes back into `data`
+      UndertaleIO.Write(outFileStream, data);
+    A helper console tool with exactly these operations (listnames, search,
+    patch, decompile1, markerpatch) was built during this session at
+    G:\Temp\claude\...\scratchpad\utmt-tool\ - that path is SESSION-SCOPED
+    and will not persist, but the technique above is all that's needed to
+    reconstruct it if useful. ilspycmd (`dotnet tool install -g ilspycmd`)
+    was useful for inspecting the Buttplug library's actual method
+    signatures when the NuGet package had no XML docs.
+  - Game's bytecode version is 17 (confirmed via GeneralInfo.BytecodeVersion)
+    - this is the modern GameMaker 2.3+ era format, has structs/methods.
+
+
+RE-APPLYING THE PATCH (e.g. after a game update, or if you revert to backup)
+------------------------------------------------------------------------------
+Original data.win is backed up at:
+  D:\NSFW Games\wifes_bedroom_win\data.win.bak
+
+If you ever need to reapply the patch to a fresh/different data.win:
+  Easiest: open UndertaleModTool, load the target data.win, Scripts menu >
+  run buttplug-mod\AddButtplugTelemetry.csx, then File > Save.
+  It's idempotent and will refuse to touch anything if the expected
+  oFutaMatingPress code isn't found (e.g. wrong game / heavily different
+  version), or skip cleanly if already patched.
+
+
+KNOWN HARMLESS QUIRK
+-----------------------
+ButtplugBridge may log:
+  [buttplug] error: Message with non-matching ID received.
+This is a known class of Buttplug protocol message-ID mismatch between
+client/server spec versions - confirmed non-fatal in testing (toy still
+connects and responds fine). Updating Intiface Central to the latest version
+was done as a precaution (was 3.0.0+36, updated to 3.1.0+42) but this exact
+error is log noise, not a functional blocker, as long as device connection
+still works.
+
+
+TOYLAUNCHER REWRITTEN IN PYSIDE6 (CROSS-PLATFORM)
+-----------------------------------------------------
+ToyLauncher was previously a Windows-only C#/WinForms app. It's been fully
+rewritten in Python (PySide6/Qt6), so the exact same GUI now builds and
+runs on Windows, Linux, and macOS from one codebase, packaged per-platform
+with PyInstaller (--onefile --windowed). Old WinForms source is kept for
+reference under ToyLauncher-WinForms-RETIRED\ (not deleted, not built
+anymore). New source is ToyLauncherQt\main.py.
+
+Same settings file schema as the old launcher (launcher_settings.json), so
+it's a drop-in replacement - just swap the .exe. It still shells out to
+ButtplugBridge.exe/GamePatcher.exe/ApkPatcher.exe as subprocesses rather
+than reimplementing any of their logic - those are unchanged.
+
+Notable implementation details / bugs hit and fixed during the rewrite:
+  - Qt requires cross-thread signals to be connected to bound QObject
+    methods (not lambdas) with Qt.ConnectionType.QueuedConnection to
+    reliably marshal onto the GUI thread. Getting this wrong caused
+    intermittent hangs/crashes when the bridge's stdout-reading thread
+    tried to update the UI.
+  - The reachability check and "Patch Game..." were deliberately kept
+    synchronous (brief UI freeze, ~1s) rather than threaded - not worth
+    fighting Qt threading bugs for something that short-lived.
+  - closeEvent() and app.aboutToQuit are BOTH wired to stop the bridge
+    process and wait for its reader thread - needed both because not
+    every quit path (e.g. Ctrl+Q, external SIGTERM) goes through
+    closeEvent.
+  - Bridge shutdown uses CTRL_BREAK_EVENT on Windows (needs
+    CREATE_NEW_PROCESS_GROUP at launch) and SIGINT on Linux/macOS, mapped
+    on the ButtplugBridge side to its existing Console.CancelKeyPress
+    handler - confirmed working (bridge logs its own "stopped" message on
+    a clean shutdown) on both Windows and Linux (via WSL).
+  - KNOWN LIMITATION, not fully resolved: in one narrow, aggressive
+    automated test (Start at 500ms, Stop at 6000ms, quit at 8000ms - all
+    within milliseconds of each other) the app could still crash on exit
+    on Linux ("QThread: Destroyed while thread is still running"). A
+    normal idle launch/close with no rapid clicking was confirmed clean
+    with no crash, and real usage has seconds between clicks rather than
+    milliseconds, so this is believed to be a non-issue in practice - but
+    flagging it here in case it ever surfaces.
+  - Own-name self-exclusion (so the game auto-detect glob doesn't list its
+    own exe as a candidate "game") had to be resolved dynamically from
+    sys.executable/sys.argv[0] rather than hardcoded, since the built exe
+    was renamed from ToyLauncherQt to ToyLauncher.
+Verified: built and manually exercised on Windows (native) and Linux (via
+WSL Ubuntu-22.04, including a real GUI render through WSLg) - Start/Stop/
+patch/settings-persistence all confirmed working on both. Also verified
+end-to-end through the Inno Setup installer: silent install
+(/VERYSILENT /TASKS=) lays down the new ToyLauncher.exe correctly, the
+installed exe launches and responds normally, and silent uninstall cleans
+up fully.
+
+APKPATCHER --replace-data (RUN A PC MOD'S CONTENT ON ANDROID)
+--------------------------------------------------------------
+ApkPatcher gained a --replace-data <path> option: instead of patching the
+target APK's own data file, it swaps in a caller-supplied one (e.g. a PC
+mod's data.win, like ModRoom) before applying the toy telemetry patch.
+Nothing changed about the "never bundle/redistribute" stance - both the APK
+and the replacement data file are things the caller already has; the tool
+just combines them locally. Whenever the mod updates, re-running the same
+command against the new data.win produces a fresh APK.
+
+This was verified for real on the Android emulator (Medium_Phone_API_36.0):
+took a clean copy of the official Wife's Bedroom APK (package
+aplove.aplovvare.bedroom, v1.4.6), ran
+  ApkPatcher wifes_bedroom.apk --replace-data "ModRoom V3.2\data.win" --yes
+which correctly found assets/game.droid (23MB, the official content),
+swapped in ModRoom's data.win (~8.5MB) in its place, detected it was
+already toy-patched (CheckStatus correctly ran against the REPLACEMENT
+file, not the original), re-signed, and produced an installable APK. On
+device: installed cleanly, launched, loaded libyoyo.so, and rendered
+ModRoom's actual title screen (visibly reads "VANILLA 1.1 + MODROOM V3",
+confirming it's really running the mod's bytecode and not the original
+game) - stayed alive with zero FATAL/AndroidRuntime crashes across the test.
+This answers the "is a PC mod's GameMaker bytecode even compatible with the
+official Android runner" question: yes, at least for this game/mod pair.
+
+UPDATE: the custom_futas/custom_wives/etc. question above is now resolved -
+see the --include-mods entry below.
+
+APKPATCHER --include-mods (BUNDLE custom_wives/custom_futas/ETC. INTO THE APK)
+--------------------------------------------------------------------------------
+Root-caused the open question from the --replace-data entry above by
+patching in a one-line diagnostic (temporary, not shipped): inserted
+  show_debug_message("BUTTPLUG_DEBUG_PATHS working_directory=[" + working_directory + "] program_directory=[" + program_directory + "]");
+at the top of gml_Object_oFutaMatingPress_Create_0, rebuilt, ran on the
+emulator, grepped logcat. Result:
+  working_directory=[assets/]  program_directory=[/]
+Confirms GameMaker's working_directory on Android is the APK's own bundled
+assets/ folder - read-only, baked in at build/patch time. There is no
+writable "next to the exe" folder on Android the way there is on every
+other platform, so custom_futas/custom_wives/custom_bedrooms/dialogue_packs
+/texture_packs can never be dropped in after installing - they have to be
+packaged into the APK itself.
+
+Added --include-mods <path> to ApkPatcher: point it at whatever folder
+directly contains those five subfolders (e.g. a ModRoom install), and each
+one that exists gets copied into the APK under assets/<foldername>/... at
+patch time, composing with --replace-data. Verified for real: bundled the
+actual ModRoom V3.2 mod folders this way, installed on the emulator, opened
+the in-game character customization panel, and a custom character (visually
+and unmistakably different art from the default random character) rendered
+correctly in a custom slot that was previously empty/non-functional without
+--include-mods. ModRoom shows a one-time reminder ("Custom futas must be
+placed in /custom_futas...") the first time that panel opens regardless of
+whether content is present - that's normal UI, not an error.
+
+Design intent, per explicit user direction: this is NOT about shipping any
+specific person's mod selection. --include-mods bundles whatever the caller
+points it at - their own install, their own mod choices. Everyone who uses
+this tool supplies their own mod folder; nothing about ANY specific mod
+ships with ApkPatcher itself.
+
+TOYLAUNCHER: MODS TAB + ANDROID TAB
+---------------------------------------
+Added two new tabs to ToyLauncher (Play/Mods/Android), rather than building
+separate standalone programs for mod management and Android patching -
+kept it one app on purpose, since having three separate exes for related
+tasks was confusing (came up directly in conversation with the person this
+was built for).
+
+Mods tab: lists/adds/removes ModRoom-style external mods (custom_wives,
+custom_futas, custom_bedrooms, dialogue_packs, texture_packs) via a
+QTreeWidget, backed by plain zipfile/shutil operations (no reimplementation
+of anything - just file management). Category is guessed from file
+extensions inside the zip (.wife/.futa/.bedroom/.json/.png) but always
+confirmed/correctable via a dropdown before installing - never applied
+silently, since a stranger's zip could be laid out unexpectedly even if
+this project's own mods are consistent. Mod name comes from the zip's
+single wrapping folder if it has one, otherwise the zip's own filename.
+Zip extraction guards against path traversal (rejects absolute paths and
+".." components in any entry) before calling extractall.
+
+Android tab: GUI front end for ApkPatcher, wrapping --replace-data and the
+newer --include-mods (see the ApkPatcher entries above) behind browse
+buttons and checkboxes instead of the command line. Runs ApkPatcher
+synchronously (like the existing "Patch Game..." button) since patching
+can take anywhere from a few seconds to roughly a minute - short enough
+that a wait-cursor beats the complexity of threading it.
+
+Verified for real, not just built: ran the full scripted flow (tab
+construction, mods tree population reading actual test folders, adding a
+real zip through install_mod_zip and confirming both the filesystem result
+and the tree refresh, removing it again) - 22/22 automated checks passed.
+Separately verified the Android tab's Patch APK button end-to-end with a
+real APK through an actual GUI button click (not just calling the
+underlying function directly) - produced a correctly signed, working APK,
+confirmed via the same logcat/emulator checks used earlier in this file.
+Also visually confirmed both new tabs' layout via screenshots (enabled/
+disabled checkbox state, tree contents, pre-filled fields) before shipping.
+
+Installer (ToyBridgeLauncher.iss) updated to bundle GamePatcher.exe,
+ApkPatcher.exe, and apksigner.jar alongside ToyLauncher.exe/
+ButtplugBridge.exe - previously only the toy-bridge half of the tool was
+installed, so the Android tab wouldn't have had anything to call. Also
+added apkpatcher.keystore/.pass to [UninstallDelete]. Re-verified via the
+same silent dry-run install/launch/uninstall cycle used to verify the
+installer originally.
+
+HMV MODE (sync the game to a song's beat) - see HMVMODE.txt for full details
+-------------------------------------------------------------------------------
+New, separate opt-in patch (GamePatcher/ApkPatcher --hmv) plus a new companion Python tool
+(HmvMode/) that analyzes a local song's beat and streams it to the game over a new UDP channel,
+driving thrust rhythm and a background color tint in real time.
+
+Technical grounding, all verified directly against the actual game rather than assumed:
+  - Confirmed (by reading the real decompiled GML) that thrust isn't literal mouse-position
+    tracking - once inserted, it's an automatic cosine oscillator driven by plain instance
+    variables (thrust_time/thrust_speed/thrust_strength/thrust_middle) the game already
+    continuously updates. HMV mode just overwrites those three at the top of Step_0 while fresh
+    data is arriving (checked via a 500ms staleness timeout) - no simulated input needed.
+  - Confirmed the background's tint is already a real draw_sprite_ext parameter, just always
+    called with the literal "no tint" white constant (16777215) - swapped for a variable.
+  - Confirmed GameMaker's room speed is 60 FPS (GeneralInfo.GMS2FPS), so thrust_speed = BPM/10
+    gives exactly one thrust cycle per beat.
+  - Receiving external data requires a GameMaker event type the object didn't have before
+    (Async Networking, EventType.Other=7 / EventSubtypeOther.AsyncNetworking=68) - this needed
+    actually constructing a new UndertaleGameObject.Event/EventAction and registering it via
+    UndertaleModLib's raw API, not just CodeImportGroup.QueueReplace (which only replaces an
+    EXISTING code entry's body, it doesn't wire up new events on its own). The exact action
+    wrapper field values (LibID=1, ID=603, Kind=7, ExeType=2, etc.) were read directly off this
+    game's own existing events rather than assumed, to make sure they'd match.
+
+Bug found and fixed via real testing (not caught by static inspection): the first working
+version used `async_load[? "type"]` (ds_map shorthand accessor) and crashed at runtime with
+"ERROR ... unable to convert string \"type\" to int64" - this game's compiler apparently can't
+correctly infer that async_load is string-keyed via the shorthand. Fixed by switching to the
+explicit `ds_map_find_value(async_load, "type")` function form, which sidesteps the inference
+entirely. Re-verified with the identical test packets that crashed the old version - confirmed
+the exact same process stayed alive and responsive afterward.
+
+Added --hmv to both GamePatcherCli and ApkPatcher (mirrors --replace-data/--include-mods -
+composable, e.g. `ApkPatcher game.apk --replace-data ModRoom\data.win --hmv`).
+
+HmvMode/ (the companion tool) uses librosa for beat detection + a fixed-high-saturation,
+continuously-rotating hue for the tint (explicit user requirement: colorful, not just
+brightness/grayscale - a quiet moment in a song should still look tinted, not fade to gray).
+Ships as a plain Python script, not a compiled .exe like everything else in this project -
+librosa's numba dependency crashes when PyInstaller-frozen in this configuration (confirmed:
+crashes both with and without NUMBA_DISABLE_JIT, works perfectly as a plain script) - not worth
+fighting further given every other piece of this feature needed real verification too.
+
+HONEST STATUS: game-side patch verified safe (compiles correctly, doesn't crash idle OR while
+receiving real UDP traffic, confirmed by literally finding and fixing a real crash this way).
+Beat detection and color math verified independently (known-tempo test track, known color
+values). NOT yet confirmed: the actual live feel/look (thrust visibly on-beat, tint visible on
+screen) - getting into an active scene needed either real mouse/touch interaction (better done
+by a person than blind automation) or fighting an Android emulator's UDP NAT layer (a
+testing-only complication - doesn't apply to a real phone on the same network as the PC running
+HmvMode). Left as the next real-world playtest rather than force through further automation.
+
+TOUCH CONTROLS PATCH (fixes ModRoom settings that don't work on Android)
+----------------------------------------------------------------------------
+Root-caused via real user report ("custom character/settings not selectable on mobile") plus
+directly reading ModRoom's actual decompiled code (not guessed): confirmed ModRoom relies on two
+PC-only inputs with no touchscreen equivalent at all -
+  - mouse_check_button_pressed(2) (= mb_right, right-click) for the portrait/outfit toggles,
+    found at two call sites in oFutaMatingPress_Step_0.
+  - mouse_wheel_up()/mouse_wheel_down() for every scrollable menu (custom wife/futa picker,
+    background picker, etc.) - all funnel through one shared function, menu_scroll_update(),
+    inside Create_0.
+Confirmed this is ModRoom-specific, not a general Android gap - vanilla's own official Android
+build works fine with plain taps in the same testing this session, since the official developer
+presumably adapted its own controls for touch; ModRoom is a PC-only community mod that was never
+adapted, and running it on Android at all is already outside how it was designed to be used.
+
+Added --touch-controls to GamePatcherCli/ApkPatcher, a third separate opt-in patch (alongside
+--hmv) that adds touch-equivalent alternatives without changing PC mouse/wheel behavior at all:
+  - A long-press (mouse/touch held 450ms) synthesizes the same right-click event the existing
+    code already checks for - both mouse_check_button_pressed(2) call sites now also accept a
+    new touch_long_press_synthetic flag, tracked by a small state machine prepended to Step_0.
+  - menu_scroll_update() now also accumulates vertical drag distance while the mouse/touch is
+    held, converting each ~64px of drag into the same +/-1 step a wheel notch would produce -
+    patched once, in the one shared function every scrollable menu already goes through.
+
+Verified on a real Android device/emulator: the long-press -> right-click substitution works
+(confirmed by the user - "the right click now works"). Drag-to-scroll was reported by the user as
+still not working after this same patch - not yet re-diagnosed, still open.
+
+UPDATE (2026-07-26): rather than keep chasing the still-undiagnosed drag-to-scroll bug above, user
+asked specifically for the pill menu to not need scrolling at all - "fully laid out." Read the real
+GML (ModRoom's data.win.bak, gml_Object_oFutaMatingPress_Draw_0) to check feasibility before
+touching anything: pill_data is a hardcoded 14-entry array, drawn as a single-column list capped at
+_visible = min(_count, 11) rows (matching bg_menu's same shared shape, but pill_menu has its OWN
+separate cap, not derived from bg_menu's). Checked the room's actual layout to confirm extending
+to all 14 rows (list would end at y=276) doesn't collide with anything else - the only other UI
+sharing that side of the screen (the bottom icon-button column, "vertical buttons list") sits at
+y=377-497 (room height is 512), comfortably clear.
+
+Added to --touch-controls (GamePatcherCli/ApkPatcher), best-effort/ModRoom-specific same as the
+futaScan/wifeScan fixes above (vanilla Wife's Bedroom has no pill menu at all - confirmed directly,
+so this gracefully no-ops there): three literal "11"s in Draw_0's pill-menu block (the visible-row
+cap, the down-arrow visibility check, and the row-culling check) changed to derive from the actual
+pill count instead, plus the matching menu_scroll_update(pill_menu, total_pill_amount, 11) call in
+Step_0 changed to pass total_pill_amount as the visible-count argument too (so the scroll clamp
+permanently allows a range of exactly 0 - scrolling becomes fully inert for this menu, sidestepping
+the drag-to-scroll bug rather than fixing it). All four changes are required together - applied
+as a single all-or-nothing group (like futaScan/wifeScan, but stricter: partial application here
+would leave the menu visibly broken rather than just missing a nice-to-have).
+
+VERIFIED FOR REAL: patched a scratch copy of ModRoom's actual data.win.bak, confirmed compile
+success (CodeImportGroup didn't throw) and decompiled the result back out to confirm the exact
+intended GML landed (var _visible = _count; the down-arrow and row-cull checks both now reference
+_visible; Step_0's call now passes total_pill_amount twice) - and confirmed the pre-existing
+futaScan/wifeScan fixes still apply correctly alongside it (no regression). Then built a REAL
+Android APK end-to-end: ApkPatcher --replace-data (ModRoom's data.win.bak) --include-mods (ModRoom's
+own folder) to get a fresh base, then --touch-controls on top (this repo's established two-step
+composition, since --touch-controls can't combine with the default patch in one run) - installed
+and launched on the Android emulator (Medium_Phone_API_36.0), confirmed via logcat: all real mods
+loaded correctly (multiple "SUCCESS: Loaded X" lines - purgatory_brexoianu__wolf, sponty_-_lover,
+vivian, custom_wife_template; a few "Failed to find asset" lines for packs using the newer/
+incompatible naming convention, matching the ALREADY-documented genuine content limitation from the
+custom-wife section below, not a new bug), and "Entering main loop" reached with no crash. Screenshot
+of the title screen confirmed "15 CUSTOM LOVER(S) LOADED, 1 CUSTOM WIFE(S) LOADED." Could NOT get
+past the title screen via blind ADB taps to visually screenshot the pill menu itself specifically -
+tried twice, gave up rather than keep guessing at touch coordinates/timing, consistent with this
+project's own earlier-established position that navigating INTO an active scene is better done by
+a person than blind automation. So: the CODE change and the underlying GML math are both genuinely
+verified; the actual on-screen look of the expanded pill list is not yet confirmed - worth a quick
+look the first time this build is played for real.
+
+Built APK: D:\NSFW Games\ModRoom V3.2\Android Builds\ModRoom-Android-toybridge.apk (base APK was
+E:\Downloads\wifes_bedroom (1)_src (1).apk - the same one investigated in the Android section
+below). This is a real deliverable file (not scratchpad-only) since the user asked to test it
+directly - unlike the mod's own bundled game content, this doesn't violate the "don't redistribute
+the game" policy since it's for the same person who already owns both the base game and ModRoom.
+
+UPDATE (same day, immediately after): user pushed back - a taller single column still isn't
+guaranteed to fit on an actual device (the room-height math above was never visually confirmed,
+just calculated), and explicitly asked for a real 2-column grid instead (7 rows per column) so
+nothing can ever run off-screen regardless of exact device layout. Replaced the whole approach:
+rather than incrementally patch the 3-4 numeric literals as before, GamePatcher.cs's pill-menu
+patch now replaces the ENTIRE original pill-menu block in Draw_0 wholesale with a genuinely
+different implementation - `_rows = ceil(_count / 2)`, then each pill's position is `_col = i div
+_rows`, `_row = i mod _rows`, `b2_x = (room_width - 62) - (_col * 88)`, `b2_y = 120 + (12 *
+_row)` - column 0 keeps the original x position, column 1 sits 88px to its left (a deliberately
+generous gap versus sButtonBack's ~64px rendered width at its 4x draw scale, chosen without being
+able to visually confirm the real spacing - see below). pill_menu.scroll/scroll_lerp are no longer
+referenced at all for this menu, so the Step_0 call to menu_scroll_update(pill_menu, ...) was
+removed entirely (not just neutralized) rather than left as inert dead code.
+
+Re-verified the same way as before: scratch-patched a FRESH copy of ModRoom's pristine data.win.bak
+(the old scratch copy from the previous round was already patched, needed a clean one for the new
+markers to match against), confirmed compile success, decompiled the result back out and hand-
+checked the actual math (item 0: col=0,row=0 -> x=818,y=120; item 6: col=0,row=6 -> x=818,y=192;
+item 7: col=1,row=0 -> x=730,y=120; item 13: col=1,row=6 -> x=730,y=192) - confirms both columns
+only ever reach y=192 now (down from the previous attempt's y=276), and Step_0 no longer mentions
+pill_menu at all. Rebuilt the real Android APK (reused the already-built step1.apk with ModRoom
+data+mods already bundled from the previous round, rather than re-deriving it, since the original
+source APK at E:\Downloads\wifes_bedroom (1)_src (1).apk had disappeared from disk between rounds
+for unknown reasons - not investigated further, just worked around) and re-verified on the Android
+emulator: all 16 real mod packs loaded successfully, "Entering main loop" reached, no crash.
+
+STILL NOT VISUALLY CONFIRMED (same limitation as before, stated plainly rather than glossed over):
+couldn't navigate past the title screen via blind ADB taps either round, so the actual on-screen
+spacing/overlap of the two columns has never been directly seen - the 88px gap is a reasoned
+estimate (button sprite width * draw scale + margin), not a measured one. If it looks off in
+practice (too cramped or too spaced out), that literal 88 in PillMenuReplacement's b2_x formula is
+the one knob to retune.
+
+UPDATE (same day, once the two-column layout was confirmed working on a real device): user asked
+to have this Android build workflow live IN ToyLauncherQt's existing Android tab, rather than
+needing a manual ApkPatcher command line each time. That tab (source APK / --replace-data checkbox
++path / --include-mods checkbox+path / --touch-controls checkbox / "Patch APK" button) already
+existed and already does exactly the right 2-step composition - but NONE of its fields persisted
+across launches except the mods folder (which already piggybacked off the Play/Mods tabs' shared
+ModsPath). Added persistence for the rest: new Settings fields AndroidApkPath,
+AndroidReplaceDataEnabled, AndroidReplaceDataPath, AndroidModsEnabled, AndroidTouchControls
+(defaults true - "recommended"), restored on load and saved immediately on every Browse/checkbox
+change, mirroring the existing GamePath/ModsPath pattern.
+
+Bug found and fixed via direct testing (not assumed correct after writing): restoring the three
+checkboxes' checked state by calling .setChecked() on each in sequence fires each one's .toggled
+signal immediately, and all three are wired to _update_android_enabled_state() - which ALSO
+persists all three checkboxes' CURRENT state as a side effect (single hook point for both jobs).
+Restoring the first checkbox therefore fired that persist-all-three logic before the other two
+had been restored yet, reading their still-default (unchecked) values and silently overwriting
+their real saved settings back to false - so persisted true values would never actually survive a
+second launch. Caught by a real save/restore round-trip test simulating two separate app
+instances reading the same settings file (not just constructing the UI once and eyeballing it) -
+confirmed the exact symptom (AndroidModsEnabled saved true, restored as false), fixed by blocking
+signals on all three checkboxes while setting them during restoration and syncing/persisting once
+at the very end instead. Re-ran the same round-trip test after the fix: all three checkboxes and
+both path fields (tested with real existing files, since the path-restore logic deliberately
+only shows a path if the file still exists - confirmed that guard behaves correctly on a
+nonexistent path too) now correctly survive a simulated restart.
+
+Rebuilt and redeployed ToyLauncher.exe (onedir) to all 4 locations. Also pre-filled ModRoom's own
+launcher_settings.json directly (via the real Settings class, not hand-edited JSON) with
+AndroidReplaceDataPath = its own data.win.bak, AndroidReplaceDataEnabled/AndroidModsEnabled/
+AndroidTouchControls = true - everything except the source APK path, since the specific file used
+earlier this session (E:\Downloads\wifes_bedroom (1)_src (1).apk) is still missing from disk (see
+above) and pre-filling a path to a file that isn't there would just be silently ignored by the
+same exists()-guard anyway. So: opening ToyLauncher on this machine's ModRoom install now needs
+exactly one manual step (Browse for a source APK) before "Patch APK" reproduces this exact build.
+
+SEPARATE bug found via user screenshots: the CUSTOM option in the wife/lover character-type menus
+was permanently disabled on Android even with custom mods correctly bundled, because -
+  - custom_futas/custom_wives are discovered by ENUMERATING their folder with file_find_first(),
+    which is well-documented to silently find nothing against files bundled inside an Android
+    APK's assets/ folder (only opening a file by an already-known name works there) - so
+    custom_sprite_loaded/custom_wife_sprite_loaded never became true and the CUSTOM button stayed
+    disabled, even though the individual files were all present and readable.
+  - working_directory has a trailing slash on Android ("assets/") but not on PC, so the game's own
+    path-building (working_directory + "/custom_futas/...") produced a broken double slash
+    ("assets//custom_futas/...") that also breaks file_exists() on Android - confirmed directly
+    via a diagnostic probe.
+  - directory_exists() does not work at all on Android bundled assets either (confirmed via probe:
+    returns false even for a folder that definitely exists, while file_exists() on a specific file
+    inside that same folder correctly returns true) - a third, independent Android-only gap.
+  - GameMaker's Android sprite/texture loader (sprite_add, used inside check_custom_futa's legacy-
+    naming detection) additionally lowercases the asset path internally before opening it, while
+    file_exists() does not - a mixed-case mod folder ("Phoebe") passed file_exists() but then
+    crashed inside sprite_add() looking for "phoebe" instead.
+A FIFTH Android-only path issue turned up once the first four were fixed and most, but not all,
+packs started loading: any pack whose folder name contains a space (e.g. "Momo Yaoyorozu", "(COMM)
+6.4 yoruichi tybw - partner") still failed - confirmed via logcat that GameMaker's Android asset
+lookup also replaces spaces with underscores internally before opening the path, so a bundled zip
+entry with a literal space never matches. Folder names are now normalized (lowercased AND spaces
+replaced with underscores) consistently everywhere: the bundled zip entries, the manifest content,
+and the GML-side path construction that reads it.
+
+Fixed all five together: --include-mods now also writes a _manifest.txt (one subfolder name per
+line) into custom_wives/custom_futas/texture_packs when bundling them, and bundles those three
+folders' contents fully normalized (lowercase, spaces -> underscores); --touch-controls patches the
+game to read that manifest instead of enumerating (falling back to the original file_find_first
+behavior when no manifest is present, so PC is completely unaffected), normalizes working_directory
+before use, and calls check_custom_futa()/check_custom_wife() directly per manifest entry instead
+of gating on directory_exists(). Verified end-to-end via logcat on a real device with the actual
+bundled mods: all 15 real custom_futas packs and all 4 custom_wives packs report "SUCCESS: Loaded"
+(the one non-loading futa folder, "Vanilla NonCon Futa", legitimately contains only a dialogue.json
+and no character sprites/data at all, so it correctly doesn't count as a custom character).
+
+SEPARATE issue found along the way, tried, and then REVERTED (this one was NOT Android-specific -
+affects PC too): check_custom_wife()/func_load_custom_wife() only ever recognize the OLD naming
+convention (custom_data.wife, custom_wife_mating_press_0.png, etc. - matching only the bundled
+custom_wife_template) with no "legacy naming" fallback the way check_custom_futa() has. Real
+downloaded wife mod packs (Meru, Momo Yaoyorozu, yoruichi) use a different, newer convention
+(custom_data.spouse, custom_mating_press.png, custom_portrait.png, custom_reverse_cowgirl.png,
+custom_xray.png) that these functions never check for at all, so those three wife packs never pass
+validation via the CUSTOM button on any platform. First attempt: --include-mods bundled an
+ADDITIONAL aliased copy of each newer-convention pack's files under the old names the game already
+knows how to read (custom_data.spouse -> custom_data.wife, custom_mating_press.png ->
+custom_wife_mating_press_0.png, etc., purely at zip-packaging time, no data.win/GML changes). This
+DID make Meru/Momo Yaoyorozu/yoruichi report "SUCCESS: Loaded" and become selectable - but the user
+then reported they render badly broken in-game. Root cause, confirmed by reading ModRoom's actual
+draw code: custom_wife_* sprites are NOT simple animations, they're fixed-layout LAYERED RIGS - each
+"pose" is a composite built from multiple independently-drawn frames of the same sheet (frame 0 =
+boob-jiggle overlay, frame 1/2 = ass overlay variants, frame 4 = tail overlay, a "cumflation"
+belly-bulge frame), and the portrait sprite is a full hardcoded facial-expression atlas (specific
+frame indices like "14 + blush_id" and "7 + eye_id" mean specific eye/blush/mouth states across many
+combinations). The old custom_wife_template's 11/10/5/17 frame counts reflect this required layer
+count, not animation length. The newer-convention packs are simple, single-image packs that were
+never authored with this layered-rig/expression-atlas system in mind and don't contain anywhere
+near the overlay artwork it needs - there's no frame-count math or file renaming that fixes this,
+since the actual art these packs would need to add simply isn't in them. REVERTED the aliasing as a
+result: --include-mods no longer touches custom_wives pack files at all beyond bundling them as-is,
+so only custom_wife_template-style packs (old naming AND actually authored as a full compatible
+rig) work via the CUSTOM button - same as it always would have on PC. This is a genuine content
+limitation of these specific mod packs, not a bug in this tool or in ModRoom's Android support.
+
+--touch-controls is mutually exclusive with the default toy-telemetry patch and --hmv in a single
+run (each is a distinct patch) - to combine, run the tool once per patch, feeding each output
+back in as the next run's --replace-data (confirmed this composition works, same as --hmv does).
+
+HMV MODE - IN-GAME SPEAKERS + REAL-TIME ENGINE (2026-07-26) - see HMVMODE.txt for full details
+--------------------------------------------------------------------------------------------------
+User wanted HMV mode triggerable from inside the game (two clickable speakers near the bed - drag/
+drop, browse, or paste a path for a song) instead of only via command line, and pointed at two
+small open-source Buttplug.io-adjacent tools for beat-detection ideas: Audio-To-Vibrations
+(github.com/DabzillaNation/Audio-To-Vibrations, MIT) and musicboom (github.com/NovaGlider/
+musicboom, NO stated license). Both react to audio live (smoothing/threshold, no offline BPM
+analysis) rather than pre-scanning a whole file the way main.py's librosa-based approach does;
+musicboom specifically splits bass/treble via low/high-pass filters, one per motor. Per discussion,
+only the general IDEAS were reused (frequency-band splitting and live envelope-following aren't
+copyrightable) - musicboom's actual source was not read or copied, since it has no license and
+therefore no legal permission to copy attaches to it; Audio-To-Vibrations' MIT status would allow
+copying, but since our stack is C#/.NET and Python, not Rust, it's a reimplementation either way.
+
+Decided with the user up front (AskUserQuestion): the actual picker UI (drag/drop/Browse/paste)
+lives in ToyLauncher, not inside the GameMaker game - clicking a speaker just pings ToyLauncher
+over UDP, which pops up the picker. This sidesteps needing a native GameMaker extension DLL for
+real OS file drag-and-drop (GML has no built-in for that at all). PC/Windows-only scope. Both
+repo ideas were wanted (live envelope-following AND the dual-band split).
+
+Three pieces, all VERIFIED FOR REAL (not just "compiles" - see HMVMODE.txt's UPDATE section for
+the specific capture/decompile/window-enumeration evidence for each):
+
+  (1) GamePatcher.cs's --hmv patch (GamePatcherCli\, ApkPatcher\, mirrored to shareable\) extended
+  with two clickable speaker icons, drawn PROCEDURALLY (draw_circle/draw_rectangle) rather than as
+  a new sprite/object/room-instance asset - checked first whether the bedroom room already had a
+  reusable decorative object near the bed (it doesn't - only oBackground/oCondom/oCum/
+  oFutaMatingPress exist, room is 880x512, background is one flat painted image per theme), then
+  deliberately chose NOT to spike brand-new UndertaleModLib asset creation (sprite/object/room-
+  instance) since every patch in this project so far only ever adds code to EXISTING objects/
+  events, and procedural drawing gets a real (if simple) icon with zero new-asset risk. Click
+  sends one UDP ping to 127.0.0.1:45737 (HmvPingPort). Icon placement (top-left/top-right corners)
+  is a best guess, not yet seen rendered - same "confirm after a real look" status as thrust-feel
+  tuning always has needed.
+
+  (2) HmvMode\ gained hmv_common.py (shared, dependency-free extraction of main.py's already-
+  verified hue_to_bgr_int/pulse-decay math, so nothing gets re-derived or subtly diverges) and
+  live.py (new real-time dual-band engine - RBJ low-pass ~200Hz/high-pass ~1000Hz biquads via
+  scipy.signal.lfilter with persisted zi state across ticks, rolling-floor threshold-crossing hit
+  detection per band, same discrete-decaying-pulse shape as main.py). Frozen via PyInstaller into
+  HmvLive.exe - unlike main.py, this has NO librosa/numba dependency, so it's a real, working,
+  standalone .exe (finally gives HMV mode a real compiled option for at least this path). main.py
+  itself is untouched/unaffected beyond importing its shared constants from hmv_common.py now
+  instead of defining them inline.
+
+  (3) ToyLauncherQt\main.py gained HmvPingListener (background QThread UDP listener on 45737,
+  same QueuedConnection-signal pattern as the existing BridgeOutputReader) and HmvSongPickerDialog
+  (drag&drop/Browse/paste-path, launches HmvLive.exe as a subprocess - same "shell out, don't
+  reimplement" philosophy as the rest of this app).
+
+Re-patched the live wifes_bedroom_win install: its data.win already had the OLD (pre-speaker)
+--hmv patch applied, which blocks a bare re-run (AlreadyPatched), so restored from data.win.bak
+(confirmed genuinely pristine first) and reapplied both the base toy-telemetry patch and the new
+--hmv. Rebuilt/redeployed GamePatcher.exe, ApkPatcher.exe, ToyLauncher.exe (onedir + _internal\),
+and the new HmvLive.exe to both wifes_bedroom_win\ and buttplug-mod\, mirrored everything
+(HmvMode\ source, ToyLauncherQt\ source, all exes) into shareable\. NOT done: ModRoom V3.2's
+install still has the old pre-speaker --hmv patch - needs the same restore-and-reapply if wanted
+there, skipped since that's a separate install someone might not want touched without being asked.
+
+Genuinely NOT yet confirmed (flagged plainly, same as every other honest-status note in this
+file): how the speaker icons actually look/feel in the rendered game, and the live engine's
+in-game thrust/color feel - both need a real playtest. Drag-and-drop and the Browse button
+specifically weren't clicked through by a human this round (the paste-path code path and a direct
+call to the same underlying function were exercised instead, plus real end-to-end UDP capture
+proving the actual mechanism works) - worth a quick manual run-through the first time this gets
+used for real.
+
+UPDATE (2026-07-26, refreshing the Discord-share packages): once the pill-menu fix was confirmed
+working, refreshed all three existing discord-package* bundles (these are the curated,
+platform-split folders actually meant for posting/handing out, distinct from buttplug-mod\
+shareable\ which is the fuller source-included canonical copy) with everything from this session:
+  - discord-package\ (Windows): added HMVMODE.txt + HmvMode\ (main.py/live.py/hmv_common.py/
+    requirements.txt), added a README.txt pointer to HMVMODE.txt, refreshed the staged
+    ButtplugBridge.exe/GamePatcher.exe/ApkPatcher.exe/ToyLauncher.exe(+_internal)/apksigner.jar,
+    added stage\HmvLive.exe (new [Files] entry in ToyBridgeLauncher.iss), and rebuilt the Inno
+    Setup installer (ISCC.exe, same tool/path as originally documented). Confirmed via the
+    compiler's own build log that it explicitly compressed HmvLive.exe alongside every other exe
+    (direct evidence the [Files] entry took effect, not assumed). Attempted a full silent-install
+    re-verification (the established /VERYSILENT /TASKS= /DIR=<scratch> pattern used before) but
+    hit a real problem: a stuck first attempt's process apparently collided with a second attempt
+    (Inno Setup installers use a single-instance mutex), and the second one ended up showing its
+    actual wizard UI as a VISIBLE window on the real desktop despite /VERYSILENT - not a silent
+    background installer at all. Killed it immediately once noticed (via Win32 window enumeration,
+    not a screenshot) rather than let a surprise installer window sit open on the user's actual
+    screen. Did NOT retry a second time given the risk of the same collision - this specific
+    install-time re-verification was abandoned this round; the compile-log evidence plus the fact
+    that every individual bundled exe was ALREADY independently verified earlier this session
+    (each one run and tested directly, not just built) was judged sufficient without it.
+  - discord-package-android\: refreshed ApkPatcher.exe/apksigner.jar/ANDROID.txt to the versions
+    with the two-column pill-menu fix. cross-platform\linux-arm64\ButtplugBridge untouched (no
+    ButtplugBridge code changed this session).
+  - discord-package-linux-macos\: added HMVMODE.txt + HmvMode\ (Python source only - HmvLive.exe
+    itself is a Windows-only PyInstaller build; Linux/macOS users get HMV mode via "python live.py"
+    directly, same as HMVMODE.txt's existing manual-alternative instructions already describe).
+Verified buttplug-mod\'s own root copies of ApkPatcher.exe/GamePatcher.exe/HmvLive.exe/
+ToyLauncher.exe are still byte-identical to shareable\'s copies (direct file comparison) before
+treating shareable\ as an already-current baseline to draw from for these packages.
+
+
+MOD COMPATIBILITY CHECKER/CONVERTER (vanilla Wife's Bedroom <-> ModRoom V3.2) (2026-07-26)
+----------------------------------------------------------------------------------------------
+User noticed some custom character packs work on one game build but not another, and asked
+whether the launcher could detect the target version and fix a pack to match it. Investigated by
+directly decompiling BOTH games' real oFutaMatingPress_Create_0 (not guessed) before designing
+anything - the situation turned out better than expected:
+
+  - Vanilla has its OWN custom-character system (func_load_custom/func_set_custom_lover/
+    func_set_custom_partner, and - a genuine surprise - real custom AUDIO support via
+    func_get_custom_audio, reading moan_slow/moan_fast/orgasm subfolders per character) - a single
+    flat custom/<name>/ folder, type auto-detected per-subfolder by which data file is present
+    (custom_data.futa/.spouse/.bedroom).
+  - ModRoom REPLACED this wholesale with its own different system (check_custom_futa/
+    check_custom_wife) - separate custom_futas/custom_wives/custom_bedrooms folders, type declared
+    by which folder a character sits in, and NO custom audio support at all (confirmed absent -
+    corrects something told to the user in an earlier reply this session, that custom voice/SFX
+    isn't possible at all; it depends entirely on which build).
+  - Critically, the actual per-character FILES are compatible between the two systems for packs
+    using the "simple" filename convention (custom_portrait.png, custom_mating_press.png, etc.,
+    same INI field names in custom_data.futa) - confirmed by reading vanilla's func_load_custom
+    field-by-field against real ModRoom packs already on disk. The one genuine mismatch: the
+    wife-type data file extension differs between the two (ModRoom's own check_custom_wife only
+    recognizes "custom_data.wife"; vanilla's func_load_custom only recognizes "custom_data.spouse"
+    - real packs on disk here, e.g. Meru, actually use .wife) - a rename, not a rewrite. Packs using
+    the OLDER numbered convention (custom_futa_mating_press_0.png, etc. - custom_futa_template/
+    custom_wife_template/Pony Template... actually Pony Template turned out to use the SIMPLE
+    convention on inspection, only custom_futa_template/custom_wife_template use the numbered one)
+    genuinely can't move between systems without being redrawn - vanilla's loader was confirmed to
+    never reference any numbered-suffix filename at all.
+
+So the real "fix" is mostly a FOLDER RESTRUCTURE (+ one extension rename for wives), not a content
+rewrite. Built two pieces:
+
+  (1) GamePatcher.cs (GamePatcherCli\, mirrored to ApkPatcher\/shareable\): new read-only
+  CheckCustomModSystem(dataWinPath), returns Vanilla / ModRoomStyle / Unknown by checking for
+  "func_set_custom_lover" vs "custom_futas" in the decompiled Create_0 text. Wired into
+  GamePatcherCli's Program.cs as a new standalone --check-mod-system flag (never patches anything).
+  Verified against both real data.win.bak files AND the live currently-patched data.win files
+  (confirms the marker check survives the other patches already applied) - correctly reports
+  Vanilla for wifes_bedroom_win, ModRoomStyle for ModRoom V3.2.
+
+  (2) ToyLauncherQt\main.py: new module-level classify_custom_pack()/scan_source_mods_folder()
+  (pure filename-pattern classification, layout-agnostic) and a new ModCompatibilityDialog,
+  reachable via a new "Check Compatibility with Another Game..." button in the Mods tab. Flow:
+  pick a target game exe, runs GamePatcher --check-mod-system against it (subprocess, same
+  pattern as _run_apkpatcher), scans the source mods folder classifying each character/bedroom
+  pack as portable or not, shows a dry-run report FIRST (matches this app's existing confirm-
+  before-mutate pattern - Patch Game/Patch APK), then on confirmation copies (never moves)
+  portable packs into the target's expected layout, renaming the wife data file's extension
+  when crossing between the two systems.
+
+  Real classification test against ModRoom's actual mods folder (24 packs): correctly flagged
+  custom_futa_template/custom_wife_template as non-portable (numbered convention), correctly
+  flagged "Vanilla NonCon Futa" as unrecognized (dialogue-only, no character data file at all),
+  and correctly classified everything else (including Meru/Momo Yaoyorozu/the yoruichi partner
+  pack - the SAME wife packs already documented above as rendering broken on ModRoom V3.2) as
+  portable.
+
+  VERIFIED FOR REAL, not just classified: actually copied heaven\ (futa) and Meru\ (wife) into
+  the live wifes_bedroom_win install's custom\ folder (Meru's custom_data.wife correctly renamed
+  to custom_data.spouse in the process), then launched the REAL vanilla game directly from a
+  terminal - unlike Android, this Windows build prints GameMaker's show_debug_message output
+  straight to the console, no logcat-equivalent tooling needed. Confirmed: "custom folder
+  detected", both ".../custom/heaven" and ".../custom/Meru" discovered and their real
+  func_load_custom() invoked, both games' now-familiar "Entering main loop" with no crash and NO
+  "missing files" warning (vanilla's own custom_warning list, which would have fired if any
+  expected sprite were still sitting at its hardcoded fallback default). Chased down the handful
+  of "undefined" debug lines that printed during loading rather than assuming they were harmless -
+  traced to func_replace_custom_sprite's own sprite-cache-lookup debug print (undefined = "not
+  cached yet, loading now" on a first load - completely expected, not an error). heaven and Meru
+  are now genuinely, confirmed-working custom characters in the vanilla install going forward
+  (left in place - this was the actual point of the feature, not just a test artifact to clean up;
+  removable via the Mods tab like any other pack if not wanted).
+
+  NOT YET DONE: the reverse direction (vanilla-style custom/ -> ModRoom-style split folders) uses
+  the exact same underlying functions (scan_source_mods_folder already scans a "custom/" root too,
+  and the dest-path logic in ModCompatibilityDialog._convert_clicked already branches on
+  self._target_system) but hasn't been exercised with a real vanilla-native pack this round, since
+  none exist on this machine yet to test with.
+
+
+SHARING THIS MOD
+-------------------
+Do NOT share the patched data.win directly - it contains the entire
+original game, not just this patch, so redistributing it means
+redistributing the whole game.
+Instead, share the buttplug-mod\shareable\ folder, which contains:
+  - AddButtplugTelemetry.csx (the patch script - contains only the ~20
+    lines added above, none of the original game's code)
+  - ButtplugBridge.exe (original code, no game assets)
+  - README.txt (usage instructions for someone else applying this to their
+    own legitimately-owned copy of the game)
+That folder is self-contained and safe to hand to someone else or post
+publicly.

@@ -1,0 +1,295 @@
+HMV MODE (sync the game to a song's beat)
+================================================
+
+Makes a patched game's thrust rhythm follow a local song's beat, and shifts the background's
+tint through actual color (not just brighter/darker) in time with the music. Works on both PC
+and Android, using the same patch either way.
+
+HOW IT WORKS
+---------------
+Once you're inserted, the game already drives its own thrust animation every frame from a
+handful of plain numbers (how fast it oscillates, how strong, where it's centered) rather than
+tracking your mouse position directly. HMV mode adds a small UDP listener to the game that lets
+an external tool feed those same numbers in real time, plus a color value the background now
+uses for its tint (previously hardcoded to "no tint"). If nothing is sending it data - the
+companion tool isn't running, or you're just playing normally - none of this does anything;
+gameplay is completely unaffected.
+
+There are now TWO ways to drive it - pick whichever fits:
+  (A) EASIEST: click a speaker in-game (see IN-GAME SPEAKERS below) - no command line, no
+      Python needed, PC/Windows only.
+  (B) MANUAL: run a Python script yourself, either main.py (offline, more precisely beat-locked,
+      needs Python + librosa) or live.py (real-time, needs Python but not librosa) - see STEP 2.
+
+STEP 1 - Patch your game
+-----------------------------
+  PC:      GamePatcher <path-to-game-exe-or-data-file> --hmv --yes
+  Android: ApkPatcher <path-to-game.apk> --hmv --yes
+           (combine with --replace-data/--include-mods same as any other ApkPatcher run,
+            if you also want a PC mod's content - see ANDROID.txt)
+
+This is a SEPARATE patch from the toy-telemetry one (--hmv vs. the default) - run the tool
+twice, once with --hmv and once without, if you want both. A backup is made automatically
+either way. This patch now ALSO adds the two in-game speaker icons (see below) - there's no
+separate flag for that, it's just part of what --hmv does now.
+
+IN-GAME SPEAKERS (easiest way to start it - PC/Windows only)
+------------------------------------------------------------------
+If your game is patched with --hmv, two small clickable speaker icons are drawn near the top
+corners of the screen ("off to the side of the bed") at all times. Click either one, and - if
+ToyLauncher (ToyLauncher.exe) is running - a small window pops up on your PC letting you:
+  - drag & drop a song file onto it, or
+  - click Browse... and pick one, or
+  - copy a file path to your clipboard and click "Paste path"
+As soon as you pick a song, ToyLauncher launches HmvLive.exe (a real compiled tool - no Python
+needed for this path) which starts playing the song and streaming thrust/color to the game
+immediately - no waiting for analysis. Click "Stop HMV" in that window, or just close it, to
+stop (the game falls back to normal behavior within half a second either way, same as always).
+
+The exact icon position is a best guess (room is 880x512, top-left/top-right corners) - NOT yet
+confirmed against how it actually looks in the rendered scene. If it needs to move, the
+coordinates (hmv_speaker_l_x/y, hmv_speaker_r_x/y) are in GamePatcher.cs's SPEAKER PATCH section.
+
+Clicking a speaker only ever sends one small UDP packet to ToyLauncher on this same PC - it does
+NOT open a file dialog or accept drag-and-drop inside the game itself (GameMaker has no built-in
+for real OS file drag-and-drop; a custom native extension DLL could maybe do it, but that's a much
+bigger, riskier, Windows-only piece of engineering for comparatively little gain over just letting
+the already-existing companion app handle it, which is what this does instead).
+
+STEP 2 (MANUAL ALTERNATIVE) - Run a companion script yourself with a song
+------------------------------------------------------------------------------
+Needs Python 3.10+. Two scripts, pick one:
+
+  main.py   - offline analysis (pre-scans the whole song for a beat/BPM grid via librosa before
+              playing - more precisely beat-locked, especially for busy/mashup tracks, but there's
+              a short wait up front, and it can't be frozen into a standalone .exe - see WHY NOT
+              AN EXE below).
+  live.py   - real-time (no pre-analysis wait, starts playing and reacting immediately) - splits
+              the song into a bass band and a treble band and reacts to each live, inspired by two
+              small open-source tools (github.com/DabzillaNation/Audio-To-Vibrations, MIT license;
+              github.com/NovaGlider/musicboom, no stated license - only its general idea of
+              splitting bass/treble was reused, not its code, since no license means no legal
+              right to copy it). This is what the in-game speakers actually launch (as HmvLive.exe,
+              a frozen build of this exact script) - running it manually is the same thing, just
+              from a command line instead of a click.
+
+  cd HmvMode
+  pip install -r requirements.txt
+  python main.py "path/to/song.mp3"
+    -- or --
+  python live.py "path/to/song.mp3"
+
+main.py options:
+  --cycles-per-beat N   how many thrust cycles per detected beat (default 0.3 - raise this if it
+                         still feels too slow, lower it if still too fast)
+  --host HOST           where to send (default 127.0.0.1, i.e. this same PC)
+  --port PORT           default 45736 (must match the port the patch listens on)
+
+live.py options:
+  --base-speed N        resting thrust_speed between hits (default 3.0 - game's own normal pace
+                         is 2.0; hits multiply on top of this)
+  --host HOST / --port PORT   same meaning as main.py's
+
+FOR ANDROID: the game runs on your phone, not this PC, so --host needs to be your phone's own
+LAN IP (same network as this PC) instead of the default 127.0.0.1 - e.g.:
+  python main.py "song.mp3" --host 192.168.1.50
+(Find your phone's IP in its Wi-Fi settings.) No port-forwarding or extra setup needed for a
+real phone on the same network - unlike testing this against an Android emulator, a real device
+has no NAT layer in the way. (The in-game speakers/ToyLauncher flow above is PC/Windows-only for
+now - this manual route is still how you'd drive HMV mode for an Android install.)
+
+Only local audio files - no links/URLs. Nothing about the song is uploaded anywhere; the tool
+just reads the file, analyzes it, and sends small numeric UDP packets (thrust/color values, not
+audio) to the patched game.
+
+WHY NOT AN EXE (main.py specifically - live.py is a real .exe, see below)
+-------------------------------------------------------------------------------
+Every other tool in this project ships as a self-contained .exe - main.py doesn't, because its
+beat-detection library (librosa) depends on numba (a JIT compiler), and numba's JIT doesn't work
+correctly once bundled by PyInstaller in this configuration (confirmed - it crashes on startup
+inside the frozen build, both with and without numba's JIT explicitly disabled, while working
+completely correctly as a plain Python script). Rather than fight that, main.py ships as a script.
+If you're on Linux/macOS this also means no separate build step needed - the same script runs
+anywhere Python does.
+
+live.py deliberately has NO librosa/numba dependency (it doesn't do offline beat detection at
+all - see its own docstring), which turned out to sidestep this problem entirely: it WAS
+successfully frozen into HmvLive.exe via PyInstaller (--onefile), and that exe was verified to
+actually run standalone and stream real, correct UDP packets (captured directly, not assumed) -
+so unlike main.py, live.py getting a real compiled build isn't blocked on anything. This is what
+the in-game speakers (see above) actually launch.
+
+HONEST STATUS
+-----------------
+Confirmed for real: the game-side patch compiles and installs correctly (verified by inspecting
+the actual patched bytecode, not just assuming), the patched game boots and plays completely
+normally with the patch present but idle (no side effects when nothing's sending it data), and
+the game survives receiving real HMV packets without crashing - including finding and fixing a
+genuine bug this way (an early version crashed with a GameMaker runtime error, "unable to
+convert string to int64", from a ds_map accessor quirk in this specific compiler; fixed by using
+the explicit ds_map_find_value() function instead of the async_load[? "key"] shorthand). The
+companion tool's beat detection was verified against a synthetic test track of known tempo
+(detected 117.5 BPM against an actual 120 BPM track - normal margin for a beat tracker), and the
+HSV-to-color math was independently checked against known color values.
+
+UPDATE after first real playtest (on PC, a real song): the original version drove color and
+thrust depth from a heavily time-smoothed loudness curve, which read as slow, unsynced fading
+rather than anything obviously tied to the music, and defaulted to 1 thrust cycle per beat, which
+turned out to feel much faster than the game's own default pace (7x faster at a typical song's
+tempo). Rewritten to lock onto the actual detected beat TIMESTAMPS and produce a short, decaying
+pulse at each one (both for color - a discrete hue jump per beat, fixed brightness, no more
+fading - and for thrust depth/speed), with a much gentler default base pace.
+
+UPDATE after a second real playtest, on an actual mashup-style song: two more real, specific
+issues, both fixed.
+  1. Still "going light to dark" despite the fixed-brightness fix above - this turned out to be
+     a genuine color-math bug, not a game/rendering issue. HSV's "value" isn't how eyes actually
+     perceive brightness - pure yellow and pure blue can share an identical HSV value yet look
+     wildly different in brightness (yellow's perceptual luma is roughly 8x blue's at max
+     saturation). The hue rotation was swinging between perceptually-bright and
+     perceptually-dark hues at a genuinely fixed V, which still reads as flickering brightness.
+     Fixed by solving for whatever V makes each hue's ACTUAL apparent brightness match a shared
+     target, measured directly (see main.py's hue_to_bgr_int) rather than assumed - saturation
+     was also brought down from 0.95 to 0.6, because pure blue simply can't reach a high
+     brightness target at high saturation no matter what V is used (checked directly: at 0.95
+     saturation the brightest blue can ever get is ~16% luma; at 0.6 saturation every hue can
+     reach a shared ~47% luma target with no clamping anywhere - verified this lines up exactly
+     for every 30-degree hue step, not just spot-checked).
+  2. "Doesn't match the audio" - beat_track was analyzing the full mix (vocals, melody,
+     everything together), unreliable for a busy/mashed-together track. Per direct, specific
+     feedback ("sync to something that repeats like a beat/bass"), now isolates the percussive
+     component first (librosa.effects.hpss) and further restricts onset detection to bass/kick
+     frequencies (<200Hz) specifically, so both the detected tempo and the individual pulse
+     trigger times are based on actual bass hits, not a generic whole-mix estimate.
+
+Both fixes verified the same way as before - a UDP listener capturing real packet values during
+an actual run against the test track, confirming beat-locked timing (pulses landing every ~0.5s
+at the test track's known 120 BPM) and, this time, ALSO confirming the luma-uniformity claim
+directly (queried hue_to_bgr_int at 12 hues around the color wheel, luma varied only 119.1-119.8
+out of 255 - effectively zero perceptible difference). Still not yet confirmed: the in-game feel
+with THIS version - that's the next real playtest. If something's still off, HUE_STEP_DEGREES,
+PULSE_DECAY_SEC, THRUST_STRENGTH_BASE/PEAK, BASS_FMAX_HZ, and --cycles-per-beat are the knobs.
+
+UPDATE (this round) - in-game speakers + a new real-time engine (live.py/HmvLive.exe):
+Two additions, both building on the above rather than changing it - main.py/v3's formulas
+(hue_to_bgr_int, the discrete-decaying-pulse shape) were extracted into a shared hmv_common.py
+and reused VERBATIM by the new code below, not re-derived, specifically so the two already-hard-
+won fixes above (perceptual-luma color, discrete pulses not smooth fades) apply here too.
+
+  (1) Two clickable speaker icons, added to the --hmv patch (GamePatcher.cs's SPEAKER PATCH
+  section) - drawn procedurally (draw_circle/draw_rectangle, no new sprite/object/room-instance
+  asset - every patch in this project so far only ever adds code to EXISTING objects, and that
+  was deliberately kept true here too rather than risking untested new-asset creation via
+  UndertaleModLib for a first pass). Clicking either just fires one UDP "ping" packet at
+  127.0.0.1:45737 - see IN-GAME SPEAKERS above for what happens next. VERIFIED FOR REAL: patched
+  a scratch copy of the actual game's data.win, confirmed the game compiles clean (CodeImportGroup
+  didn't throw), decompiled the patched Create_0/Step_0/Draw_0/Other_68 back out and confirmed
+  byte-for-byte the intended GML landed correctly (not just "no error"), and confirmed idempotency
+  (--check reports AlreadyPatched, a second --hmv --yes run is a safe no-op). Exact icon placement
+  (top-left/top-right corners, room is 880x512) is a best guess, genuinely not yet seen rendered.
+
+  (2) A new real-time engine, live.py (frozen as HmvLive.exe), inspired by two small open-source
+  Buttplug.io-adjacent tools the user pointed at: Audio-To-Vibrations (github.com/DabzillaNation/
+  Audio-To-Vibrations, MIT) and musicboom (github.com/NovaGlider/musicboom, NO stated license - so
+  only its general idea was reused, not its actual Rust source, since no license means no legal
+  right to copy it; frequency-band splitting via a filter isn't itself copyrightable). Splits the
+  signal into a bass band (RBJ low-pass, ~200Hz) and treble band (RBJ high-pass, ~1000Hz), each
+  with its own rolling-floor threshold-crossing hit detector (Audio-To-Vibrations' smoothing +
+  threshold idea) - bass hits advance the hue and drive the thrust_strength pulse, treble hits add
+  a smaller secondary thrust_speed accent. VERIFIED FOR REAL: built a synthetic 120 BPM test track
+  (kick every 0.5s, hi-hat every 0.25s, generated directly, not borrowed), ran live.py against it,
+  captured real UDP packets, and confirmed - not assumed - bass-strength peaks landing at ~0.5s
+  intervals matching the known tempo, color advancing once per bass hit, and thrust_speed hitting
+  exactly the values the formula predicts (3.0 resting, 3.45 on a treble-only hit, 4.95 when bass
+  and treble hits coincide - base_speed*(1+bass_pulse*0.5+treble_pulse*0.15) checks out exactly).
+  Then froze it via PyInstaller (--onefile) into HmvLive.exe and ran THAT exact same test again
+  against the real frozen binary (not just the script) - genuinely works standalone, 590/590
+  packets captured, full strength range 2.0-7.0 hit. This finally gives HMV mode a real compiled
+  .exe option (see WHY NOT AN EXE above) - just not for main.py's offline mode, which still needs
+  Python + librosa if you want that specific one.
+
+  UPDATE (same day, real user report): a real .m4a file crashed HmvLive.exe immediately - too
+  fast to read the console before it closed. Root-caused (not guessed): soundfile/libsndfile has
+  simply never supported the m4a/AAC container/codec at all ("Format not recognised" - confirmed
+  directly against the actual failing file, not assumed). Fixed by falling back to audioread
+  (which shells out to ffmpeg) whenever soundfile can't open a file - confirmed this decodes the
+  actual reported .m4a correctly (217s, 44.1kHz stereo), and re-verified the fix in BOTH the plain
+  script and the rebuilt HmvLive.exe against that same real file, real UDP capture both times
+  (447 packets on the frozen-exe pass). This fallback needs ffmpeg on PATH (present on this dev
+  machine via a prior chocolatey install) - if a future "can't decode X" report turns up on a
+  machine without ffmpeg, that's the first thing to check, and bundling an ffmpeg binary
+  alongside HmvLive.exe would be the fix (not done yet - this dev machine already has it, and
+  fixing the immediate crash for testing was the actual ask this round).
+
+  UPDATE (same day, real user report): thrust depth ("how complete the in-and-out is") wasn't
+  actually tracking loudness the way it should - only speed felt right. Root-caused by reading the
+  REAL game GML (gml_Object_oFutaMatingPress_Draw_0), not guessed:
+      thrust_set = median(1, thrust_middle + (dcos(thrust_time) * (0.25 * thrust_strength)), 0)
+  median(1, x, 0) is GameMaker's clamp-to-[0,1] idiom, applied UNCONDITIONALLY (not just during
+  orgasm/knot/edge states, as an earlier summary here implied). At thrust_strength = 2.0, the
+  amplitude (0.25*2=0.5) already swings the full 0.5 +/- 0.5 = exactly 0 to 1 - already a COMPLETE
+  stroke. The old pulse design (2.0 -> 7.0 on a bass hit) never delivered "more complete" because
+  there's no "more" past 2.0 - it's clamped either way, so higher values only made the wave sit
+  pinned at the extremes longer (a pacing difference, not a completeness one).
+  Fixed by replacing the discrete pulse with a continuous loudness percentage: thrust_strength now
+  scales directly between 0.3 (quiet - a small, incomplete, mostly-centered motion) and 2.0 (loud -
+  the exact complete-stroke value above). Two real bugs found and fixed along the way, both via
+  genuine testing, not assumed correct after writing:
+    1. First attempt used an adaptive peak-hold ceiling ("loud" = current envelope vs. a reference
+       that rises instantly to a new peak, decays slowly otherwise). Caught via real UDP capture
+       against a synthetic quiet->loud->quiet test track: strength hit ~2.0 within half a second of
+       a deliberately QUIET section, because a steady section makes that kind of ceiling lock onto
+       itself almost immediately - it can only measure "loud vs. a peak that hasn't decayed away,"
+       not "loud vs. this song's real range."
+    2. Fixed by precomputing a ceiling once from the whole song (already fully decoded in memory
+       before playback anyway - this isn't the kind of slow pre-analysis this file avoids, it's a
+       single cheap vectorized numpy pass) - but the FIRST version of that fix compared a per-tick
+       MEAN envelope against a raw-sample PERCENTILE ceiling, two different statistics with a fixed
+       ratio between them for any waveform (a sine wave's mean is ~64% of its peak) that has
+       nothing to do with real loudness - caught by logging live.py's own internal elapsed/percent/
+       strength values directly (sidesteps any two-process clock ambiguity a UDP capture between
+       separate processes can introduce) and noticing the loud section topped out at pct~0.64,
+       never approaching 1.0. Fixed by computing the ceiling from the SAME statistic (mean-abs
+       over ~1/30s windows) used per tick.
+  Re-verified after both fixes, with live.py's own internal values logged directly: the
+  quiet(0-6s)->loud(6-12s)->quiet(12-18s) test track now reads strength~0.39 through both quiet
+  sections and ~1.98-2.00 through the loud one. Also spot-checked against 40s of the same real .m4a
+  from the crash report above - meaningful continuous variation tracking the actual music,
+  min/max/mean of 0.30/2.00/0.91 over that window, not stuck at one extreme. Rebuilt and redeployed
+  HmvLive.exe everywhere. Speed's existing bass/treble-pulse formula was NOT touched - only
+  thrust_strength's source signal changed.
+
+  Known trade-off vs. main.py: live.py does NOT separate percussive from harmonic content first
+  (no HPSS - that's an offline, non-causal technique, doesn't fit a genuinely real-time design),
+  so it may lock on less precisely than main.py on busy/mashed-together tracks. Neither of the two
+  inspiration repos do this either (they filter the live raw signal directly), so this matches
+  their actual approach rather than trying to approximate offline HPSS causally.
+
+  ToyLauncherQt (main.py) gained a background listener for the speaker ping (HmvPingListener, a
+  QThread using the same QueuedConnection-signal pattern as the existing bridge-output reader) and
+  a new HmvSongPickerDialog (drag&drop/Browse/paste-path, launches HmvLive.exe). VERIFIED FOR REAL
+  end-to-end, not just unit-level: sent a genuine UDP packet at the real running frozen
+  ToyLauncher.exe (not the script), and confirmed - via Win32 window enumeration by exact PID,
+  NOT a screenshot (screenshot-based verification was already proven unreliable in this
+  environment earlier in this project and deliberately not retried) - that the "HMV Mode - pick a
+  song" window genuinely appeared. Then, from the picker's own _start_song code path, confirmed it
+  actually launches the real deployed HmvLive.exe and that real HMV packets flow to port 45736
+  while it runs (68 packets captured in a short window).
+
+  STILL NOT CONFIRMED (same honest-status pattern as everywhere else in this project): the actual
+  in-game look/feel of the speaker icons and the live engine's thrust/color feel - that needs a
+  real playtest, same open item as v3's own pending playtest above. Drag-and-drop and Browse
+  specifically weren't clicked through by a human in this round (paste/direct-call paths were
+  exercised programmatically instead) - worth a quick manual click-through the first time this is
+  used for real.
+
+  Deployed: re-patched the live wifes_bedroom_win install (restored from data.win.bak, reapplied
+  both the base toy-telemetry patch and --hmv with the new speaker code - the old data.win already
+  had the pre-speaker --hmv patch applied, which blocks a bare re-run, hence the restore-and-
+  reapply). Rebuilt and redeployed GamePatcher.exe, ApkPatcher.exe, ToyLauncher.exe (onedir,
+  _internal/ included), and the new HmvLive.exe to both wifes_bedroom_win\ and buttplug-mod\, and
+  mirrored HmvMode\ (incl. the new hmv_common.py/live.py) + ToyLauncherQt\ source + all exes into
+  buttplug-mod\shareable\. NOT done this round: ModRoom V3.2's install still has the OLD (pre-
+  speaker) --hmv patch - it would need the same restore-and-reapply treatment if this is wanted
+  there too, not done automatically since that's a separate game install someone might not want
+  touched without being asked.
