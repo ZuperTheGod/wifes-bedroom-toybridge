@@ -1641,6 +1641,71 @@ functions) - all 5 still resolve identically (4 added, 1 correctly reported with
 failure sentence) - confirms the wording rewrite didn't change any actual behavior. Rebuilt/
 redeployed ToyLauncher.exe and the installer.
 
+DECOMPILER UPGRADE - fixes patching WB-ModRoom ".6" WIP fork (2026-07-27, same day, later still):
+user tried to bundle a much newer, actively-developed WIP fork's data.win (WB-ModRoom "Release 1",
+`E:\Downloads\WB-ModRoom not broken version surely version whatever .6 (2)\...`, previously
+investigated and deliberately NOT built on top of per an earlier decision this session - see the
+top-of-file plan history - but the user still wants TOY SUPPORT patched into it directly, a
+separate, legitimate ask from "build the character converter around it") into an APK via
+ApkPatcher. Patching failed with real GML compile errors: "Expected '}' or 'end', got
+'variable_struct_set'" inside gml_Object_oFutaMatingPress_Create_0.
+
+Investigated for real (added a new read-only `--dump-code <event-name> <output-file>` diagnostic
+flag to GamePatcherCli/ApkPatcher's shared GamePatcher.cs - decompiles one named code entry to a
+file, for exactly this kind of investigation; kept as a permanent tool, not removed after use) -
+dumped the actual GML Underanalyzer produced for that function from the real failing data.win and
+found the true cause: NOT anything about our own ~4-line patch (which sits at line 300, far from
+the failure). The decompiler (Underanalyzer, bundled via UndertaleModTool v0.9.1.2) was rendering
+struct literals with numeric-string field names (this fork uses lookup tables like `{ "0": [1,4],
+"1": [1,4], ... }` for per-outfit sprite-slot data) as invalid `{ variable_struct_set(self, "0",
+[1, 4]), ... }` - a known Underanalyzer bug (its own issue #23, "Structs with 'impossible' fields
+do not decompile correctly") - 305 occurrences in this one function alone, confirming it's
+systemic to this fork's coding style, not a rare edge case.
+
+Checked the Underanalyzer/UndertaleModTool GitHub repos directly (gh CLI, not guessed): the fix
+(PR #34, "Handle impossible fields in struct literals", merged 2026-07-03) is NOT in the latest
+STABLE UndertaleModTool release (v0.9.1.2, published 2026-07-13 - the changelog doesn't mention
+an Underanalyzer bump) but IS in the "nightly" bleeding-edge build. Downloaded the nightly CLI
+Windows build, built a disposable test copy of GamePatcherCli against its Underanalyzer.dll/
+UndertaleModLib.dll, and confirmed: variable_struct_set count in that same function dropped from
+305 to 5 (the 5 remaining are genuine, unrelated uses), the struct literals now decompile to
+valid `"0": [1, 4]` syntax, and - critically - the ACTUAL patch (decompile, edit, recompile)
+succeeded where it failed before. Real launch test on the patched result: clean boot straight to
+"Entering main loop." with zero errors.
+
+Given this touches a dependency shared by EVERY patch operation (toy telemetry, HMV, touch-
+controls, mod-system check) for every game, asked the user before adopting broadly rather than
+just quietly swapping it - explicit choice was to adopt fully, with full regression re-
+verification first. Moved the nightly DLLs to a permanent location (`E:\Downloads\
+UndertaleModTool_nightly-Windows\`, alongside the existing stable-release DLL folder), updated all
+4 active .csproj HintPaths (GamePatcherCli, ApkPatcher, and their shareable\ mirrors - retired
+WinForms project deliberately left alone, not built anymore), mirrored the new --dump-code
+addition into ApkPatcher's copy of GamePatcher.cs (kept identical to GamePatcherCli's except
+namespace, same as always), rebuilt both self-contained.
+
+FULL regression re-verification before treating this as safe (not just "the WIP fork works now" -
+confirming nothing that already worked broke): took PRISTINE .bak copies of both real, known-good
+installs (wifes_bedroom_win's vanilla 1.4, ModRoom V3.2) and ran a FRESH complete patch from
+scratch through the new nightly-based tool for all 4 combinations - vanilla base telemetry,
+vanilla --hmv, ModRoom base telemetry, ModRoom --touch-controls (the most complex/highest-risk
+patch, since it adds real control flow, not just literal appends) - every one patched successfully
+and re-checked as AlreadyPatched. Real launches on the two most representative results (vanilla
+telemetry-patched, ModRoom touch-controls-patched): both reached "Entering main loop." cleanly:
+ModRoom's log also loaded every real custom character/background pack with SUCCESS lines. One
+ModRoom-only line, "Error: Failed to create AL buffer from file image", looked concerning at
+first but was confirmed to ALSO appear when launching the real, currently-installed, already-
+working ModRoom V3.2 build unmodified - a pre-existing harmless startup quirk, not a regression.
+
+Redeployed GamePatcher.exe/ApkPatcher.exe (rebuilt against the nightly DLLs) to all 5 real
+locations (wifes_bedroom_win\, buttplug-mod\, shareable\, installer\stage\, ModRoom V3.2\ModRoom
+V3.2\ - the last one is just keeping the shared CLI tool consistent, not new investment in ModRoom
+V3.2 content). The two live installs' own data.win files were NOT re-patched (they were already
+correctly patched by the old tool - swapping which decompiler a FUTURE patch would use doesn't
+retroactively affect bytecode already written). Then delivered the actual original ask: patched
+the user's REAL WB-ModRoom ".6" download for real (backed up first, confirmed AlreadyPatched
+after), and launched THAT actual install directly - clean boot, zero errors, toy support is now
+genuinely present in that build. Rebuilt the installer with the refreshed staged exes.
+
 SHARING THIS MOD
 -------------------
 Do NOT share the patched data.win directly - it contains the entire

@@ -15,15 +15,15 @@
 
   <ItemGroup>
     <Reference Include="UndertaleModLib">
-      <HintPath>E:\Downloads\UndertaleModTool_v0.9.1.2-Windows\UndertaleModLib.dll</HintPath>
+      <HintPath>E:\Downloads\UndertaleModTool_nightly-Windows\UndertaleModLib.dll</HintPath>
       <Private>true</Private>
     </Reference>
     <Reference Include="Underanalyzer">
-      <HintPath>E:\Downloads\UndertaleModTool_v0.9.1.2-Windows\Underanalyzer.dll</HintPath>
+      <HintPath>E:\Downloads\UndertaleModTool_nightly-Windows\Underanalyzer.dll</HintPath>
       <Private>true</Private>
     </Reference>
     <Reference Include="Newtonsoft.Json">
-      <HintPath>E:\Downloads\UndertaleModTool_v0.9.1.2-Windows\Newtonsoft.Json.dll</HintPath>
+      <HintPath>E:\Downloads\UndertaleModTool_nightly-Windows\Newtonsoft.Json.dll</HintPath>
       <Private>true</Private>
     </Reference>
   </ItemGroup>

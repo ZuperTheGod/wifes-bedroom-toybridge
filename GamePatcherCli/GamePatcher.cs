@@ -91,6 +91,39 @@ static class GamePatcher
         }
     }
 
+    /// <summary>Diagnostic only, never modifies the data file: decompiles one named code entry
+    /// (e.g. "gml_Object_oFutaMatingPress_Create_0") and writes the full GML text Underanalyzer
+    /// produced to outputPath - for investigating decompile/recompile round-trip failures
+    /// (CodeImportGroup.Import() re-parses this SAME text with UndertaleModLib's own compiler, so
+    /// if that fails, this is what to look at) on a specific game build's own code.</summary>
+    public static string DumpCode(string dataWinPath, string eventName, string outputPath)
+    {
+        try
+        {
+            UndertaleData data;
+            using (var stream = new FileStream(dataWinPath, FileMode.Open, FileAccess.Read))
+            {
+                data = UndertaleIO.Read(stream);
+            }
+
+            var code = data.Code.FirstOrDefault(c => c is not null && c.Name?.Content == eventName);
+            if (code is null)
+            {
+                return $"No code entry named '{eventName}' found in this data file.";
+            }
+
+            var globalContext = new GlobalDecompileContext(data);
+            var settings = data.ToolInfo.DecompilerSettings;
+            string text = new DecompileContext(globalContext, code, settings).DecompileToString();
+            File.WriteAllText(outputPath, text);
+            return $"Wrote {text.Length} chars ({text.Split('\n').Length} lines) to {outputPath}";
+        }
+        catch (Exception ex)
+        {
+            return $"Error: {ex.Message}";
+        }
+    }
+
     public static PatchOutcome Patch(string dataWinPath)
     {
         try

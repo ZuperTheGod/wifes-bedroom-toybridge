@@ -49,6 +49,10 @@ if (args.Length < 1 || args[0] is "-h" or "--help")
     Console.WriteLine("                      ModRoom) instead of the toy telemetry patch.");
     Console.WriteLine("  --check-mod-system  read-only: report which custom-character mod system this game");
     Console.WriteLine("                      uses (Vanilla vs ModRoom-style) - never patches anything.");
+    Console.WriteLine("  --dump-code <event-name> <output-file>");
+    Console.WriteLine("                      read-only diagnostic: decompiles one code entry (e.g.");
+    Console.WriteLine("                      gml_Object_oFutaMatingPress_Create_0) and writes its GML to a");
+    Console.WriteLine("                      file - useful for investigating a patch failure's real cause.");
     return args.Length < 1 ? 1 : 0;
 }
 
@@ -58,6 +62,7 @@ bool skipConfirm = args.Contains("--yes");
 bool hmvMode = args.Contains("--hmv");
 bool touchControlsMode = args.Contains("--touch-controls");
 bool checkModSystem = args.Contains("--check-mod-system");
+int dumpCodeIdx = Array.IndexOf(args, "--dump-code");
 
 if (!File.Exists(inputPath))
 {
@@ -74,6 +79,17 @@ if (dataPath is null)
 }
 
 Console.WriteLine($"Game data file: {dataPath}");
+
+if (dumpCodeIdx >= 0)
+{
+    if (dumpCodeIdx + 2 >= args.Length)
+    {
+        Console.WriteLine("Usage: GamePatcher <path> --dump-code <event-name> <output-file>");
+        return 1;
+    }
+    Console.WriteLine(GamePatcher.DumpCode(dataPath, args[dumpCodeIdx + 1], args[dumpCodeIdx + 2]));
+    return 0;
+}
 
 if (checkModSystem)
 {
