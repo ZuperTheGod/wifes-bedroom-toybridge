@@ -114,22 +114,21 @@ by hand next to the game.
      file manager.
   2. The tree below lists everything currently installed, grouped by
      category, with a count next to each.
-  3. "Add Mods (.zip)..." - pick as many mod zips at once as you want (the
-     kind you'd download from Discord - character packs, backgrounds,
-     dialogue, textures, all mixed together is fine). For each one, the
-     Launcher unzips it, looks for a character/bedroom data file inside
-     (however the zip is laid out - one character, several characters
-     bundled in one zip, wrapped in a folder or not), and if it finds one,
-     automatically converts and places it into whatever layout your
-     currently-configured game (Play tab's "Game:") actually expects -
-     including the .wife -> .spouse rename ModRoom-era wife packs need on
-     a vanilla-style target. Packs using the old numbered sprite
-     convention are correctly reported as unconvertible, not silently
-     copied wrong. If a zip has no recognized character/bedroom data file
-     (dialogue/texture packs), it falls back to asking you to confirm the
-     category, same as before. Every item ends up reported as copied,
-     skipped (already installed), or failed (with why) - nothing is ever
-     silently dropped.
+  3. "Add Mods (.zip)..." - the easiest way to install mods you've
+     downloaded. Click it, then pick as many .zip files at once as you
+     want (character packs, backgrounds, dialogue, textures, all mixed
+     together is fine). The Launcher looks inside each one, works out
+     what it is, converts it if it needs converting to work with the
+     game you have set up (Play tab's "Game:"), and installs it - all
+     automatically, no folders to dig through by hand. When it's done,
+     it shows you a plain list of what got added, what you already had,
+     and anything that couldn't be added (with a plain-English reason -
+     e.g. "uses an older mod format this tool can't convert
+     automatically"). A handful of very old mod packs genuinely can't be
+     converted automatically; those are reported, never silently
+     mangled. If a zip isn't a character/background at all (a dialogue
+     or texture pack), it'll ask you what kind it is instead of
+     guessing.
   4. "Remove Selected" - deletes the selected mod's folder (or file, for a
      flat dialogue .json). Select a specific mod, not a category header.
   5. "Refresh" - re-scans the mods folder (useful if you added/removed

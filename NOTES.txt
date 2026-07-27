@@ -1606,6 +1606,41 @@ existing alongside the old, bug-prone button.
   installer - no GamePatcher/ApkPatcher/HmvLive/ButtplugBridge changes this round, confirmed their
   staged copies were still byte-identical to source before compiling.
 
+AUTO-SORTER TEXT REWRITE (2026-07-27, same day, later still): user reported the auto-sorter
+dialog was "a little confusing and not explained very well ... to someone who doesn't know
+anything about this." Correct - the original AutoSortDialog text was written like developer log
+output: it dumped GamePatcher's raw --check-mod-system stdout straight into the status box
+("Game data file: ...", "Compatible: True   System: Vanilla   (...)"), used internal jargon
+("Vanilla layout", "ModRoomStyle"), tagged every line with [OK]/[FAIL]/[SKIP], printed full
+absolute destination paths, and surfaced classify_custom_pack()'s reason strings verbatim
+("Uses the older numbered sprite convention (custom_futa_cowgirls_0.png, etc.) - needs to be
+redrawn for the other system, not just relocated.") - all fine for a developer, meaningless to
+someone who just downloaded some character packs off Discord.
+
+Rewrote AutoSortDialog's user-facing text in ToyLauncherQt\main.py (the underlying detection/
+classify/copy logic is completely unchanged, this was presentation-only):
+  - Intro label now plainly states what's about to happen and that a result list is coming.
+  - Target-game status collapsed from a raw multi-line CLI dump into one of three plain
+    sentences: ready and configured / game set but not recognized / no game set yet (with the
+    exact Play tab steps to fix it) - the raw GamePatcher output itself is now discarded rather
+    than shown.
+  - New _friendly_fail_reason() static method translates classify_custom_pack()'s two failure
+    kinds (unrecognized folder vs. old numbered sprite convention) into one plain sentence each,
+    instead of surfacing the dataclass's dev-facing .reason text.
+  - Per-item log lines dropped the [OK]/[FAIL]/[SKIP] tags and full destination paths in favor of
+    "<name> - added!" / "<name> - already added, skipped." / "<name> - couldn't add: <plain
+    reason>." Final summary changed from "X copied, Y skipped, Z failed" to "Finished: X added,
+    Y already had, Z couldn't be added."
+  - LAUNCHER.txt's "Add Mods (.zip)..." writeup reworded to match (was itself still fairly
+    technical).
+
+Re-verified after the rewrite: re-ran the exact same 5 synthetic test zips from the session's
+earlier verification through the actual updated code (calling AutoSortDialog._friendly_fail_reason
+directly alongside the real find_mod_pack_roots/classify_custom_pack/copy_classified_pack
+functions) - all 5 still resolve identically (4 added, 1 correctly reported with the new plain
+failure sentence) - confirms the wording rewrite didn't change any actual behavior. Rebuilt/
+redeployed ToyLauncher.exe and the installer.
+
 SHARING THIS MOD
 -------------------
 Do NOT share the patched data.win directly - it contains the entire

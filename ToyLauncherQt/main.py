@@ -741,19 +741,19 @@ class AutoSortDialog(QDialog):
 
         root = QVBoxLayout(self)
         root.addWidget(QLabel(
-            "Pick one or more mod .zip files - each is unzipped, its character/bedroom packs are "
-            "detected and converted to work with your configured game, and placed in the right "
-            "folder automatically. Dialogue/texture packs (no game-version-specific format) ask "
-            "you to confirm their category, same as before."
+            "Click \"Choose Mod Files...\" below and pick the .zip file(s) you downloaded - "
+            "characters, backgrounds, anything, mixed together is fine, and you can pick more "
+            "than one at a time. Each one will be automatically checked and installed if it "
+            "works with your game. When it's done, you'll see exactly what was added and what "
+            "wasn't (and why)."
         ))
 
         self._status_box = QTextEdit()
         self._status_box.setReadOnly(True)
-        self._status_box.setFontFamily("Consolas" if sys.platform == "win32" else "Monospace")
         root.addWidget(self._status_box, 1)
 
         button_row = QHBoxLayout()
-        self._pick_btn = QPushButton("Pick Mod .zip File(s)...")
+        self._pick_btn = QPushButton("Choose Mod Files...")
         self._pick_btn.clicked.connect(self._pick_and_process)
         button_row.addWidget(self._pick_btn)
         button_row.addStretch(1)
@@ -762,42 +762,47 @@ class AutoSortDialog(QDialog):
         button_row.addWidget(close_btn)
         root.addLayout(button_row)
 
-        self._log(f"Mods folder: {mods_root}")
         self._target_system: str | None = None
         if game_exe_path:
-            self._target_system, output = detect_target_mod_system(gamepatcher_exe, game_exe_path)
-            self._log(f"Target game: {game_exe_path}")
-            for line in output.splitlines():
-                if line.strip():
-                    self._log(f"  {line}")
-        if self._target_system is None:
-            self._log("\nCouldn't determine the current game's mod-folder layout - character/"
-                       "bedroom packs can't be safely placed until Game: (Play tab) points at a "
-                       "recognized install. Dialogue/texture packs can still be added below.")
+            self._target_system, _raw_output = detect_target_mod_system(gamepatcher_exe, game_exe_path)
+        if self._target_system is not None:
+            self._log("Ready - your game is set up and mods will be installed straight into it.")
+        elif game_exe_path:
+            self._log("Your game (set in the Play tab) doesn't look like a game this tool "
+                       "recognizes, so character/background packs can't be safely installed yet. "
+                       "You can still add dialogue/texture packs below.")
         else:
-            self._log(f"\nCharacter/bedroom packs will be sorted into this game's {self._target_system} layout.")
-        self._log("\nClick \"Pick Mod .zip File(s)...\" below to add mods.")
+            self._log("You haven't set a game yet. Go to the Play tab, click \"Browse...\" next "
+                       "to \"Game:\", and pick your game's .exe - then come back here. (You can "
+                       "still add dialogue/texture packs below without doing that.)")
 
     def _log(self, message: str) -> None:
         self._status_box.append(message)
+
+    @staticmethod
+    def _friendly_fail_reason(c: ModPackClassification) -> str:
+        if c.kind == "unknown":
+            return "doesn't look like a character or background pack (couldn't find its data file)"
+        return ("uses an older mod format this tool can't convert automatically - it would need "
+                "to be redrawn/updated by whoever made it")
 
     def _pick_and_process(self) -> None:
         paths, _ = QFileDialog.getOpenFileNames(self, "Select mod .zip file(s)", "", "Zip files (*.zip)")
         if not paths:
             return
 
-        copied = skipped = failed = 0
+        added = already_had = could_not_add = 0
         for p in paths:
             zip_path = Path(p)
-            self._log(f"\n=== {zip_path.name} ===")
+            self._log(f"\n{zip_path.name}")
             with tempfile.TemporaryDirectory() as tmp:
                 tmp_path = Path(tmp)
                 try:
                     with zipfile.ZipFile(zip_path) as zf:
                         _safe_extract(zf, tmp_path)
                 except Exception as ex:
-                    self._log(f"[FAIL] Couldn't extract: {ex}")
-                    failed += 1
+                    self._log(f"  Couldn't open this file - it may not be a valid .zip: {ex}")
+                    could_not_add += 1
                     continue
 
                 pack_roots = find_mod_pack_roots(tmp_path)
@@ -809,45 +814,49 @@ class AutoSortDialog(QDialog):
                             # instead of the meaningless temp-extraction folder name.
                             c = ModPackClassification(c.folder, zip_path.stem, c.kind, c.data_filename, c.portable, c.reason)
                         if self._target_system is None:
-                            self._log(f"[FAIL] {c.name}: no recognized game selected, can't place safely.")
-                            failed += 1
+                            self._log(f"  {c.name} - couldn't add: no game is set up yet (see above).")
+                            could_not_add += 1
                             continue
                         if not c.portable:
-                            self._log(f"[FAIL] {c.name} ({c.kind}): {c.reason}")
-                            failed += 1
+                            self._log(f"  {c.name} - couldn't add: {self._friendly_fail_reason(c)}.")
+                            could_not_add += 1
                             continue
                         ok, detail = copy_classified_pack(c, self._mods_root, self._target_system)
                         if ok:
-                            self._log(f"[OK] {c.name} -> {detail}")
-                            copied += 1
+                            self._log(f"  {c.name} - added!")
+                            added += 1
                         elif detail.startswith("already exists"):
-                            self._log(f"[SKIP] {c.name}: {detail}")
-                            skipped += 1
+                            self._log(f"  {c.name} - already added, skipped.")
+                            already_had += 1
                         else:
-                            self._log(f"[FAIL] {c.name}: {detail}")
-                            failed += 1
+                            self._log(f"  {c.name} - couldn't add: {detail}")
+                            could_not_add += 1
                 else:
                     source_dir, mod_name = _flat_mod_source_and_name(tmp_path, zip_path)
                     category = detect_or_ask_category(self, zip_path)
                     if category is None:
-                        self._log("[SKIP] No character/bedroom pack found and no category chosen.")
-                        skipped += 1
+                        self._log(f"  {mod_name} - skipped (cancelled).")
                         continue
                     dest = self._mods_root / category / mod_name
                     if dest.exists():
-                        self._log(f"[SKIP] {mod_name}: already exists in {CATEGORY_FOLDERS[category]}.")
-                        skipped += 1
+                        self._log(f"  {mod_name} - already added, skipped.")
+                        already_had += 1
                         continue
                     try:
                         dest.parent.mkdir(parents=True, exist_ok=True)
                         shutil.copytree(source_dir, dest)
-                        self._log(f"[OK] {mod_name} -> {CATEGORY_FOLDERS[category]}")
-                        copied += 1
+                        self._log(f"  {mod_name} - added!")
+                        added += 1
                     except Exception as ex:
-                        self._log(f"[FAIL] {mod_name}: {ex}")
-                        failed += 1
+                        self._log(f"  {mod_name} - couldn't add: {ex}")
+                        could_not_add += 1
 
-        self._log(f"\n=== Done: {copied} copied, {skipped} skipped, {failed} failed. ===")
+        summary = f"\nFinished: {added} added"
+        if already_had:
+            summary += f", {already_had} already had"
+        if could_not_add:
+            summary += f", {could_not_add} couldn't be added"
+        self._log(summary + ".")
 
 
 class MainWindow(QMainWindow):
