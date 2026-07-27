@@ -182,6 +182,91 @@ def scan_source_mods_folder(mods_root: Path) -> list[ModPackClassification]:
     return results
 
 
+def _looks_like_pack_root(folder: Path) -> bool:
+    """True if `folder` directly contains a recognized character/bedroom data file (either
+    naming convention) - i.e. is itself a pack, not just a folder that happens to contain one
+    somewhere inside it."""
+    try:
+        entries = [e.name for e in folder.iterdir()]
+    except OSError:
+        return False
+    if any(e.lower() in CUSTOM_DATA_FILE_KIND for e in entries):
+        return True
+    return any(_OLD_CONVENTION_DATA_PATTERN.match(e) for e in entries)
+
+
+def find_mod_pack_roots(root: Path) -> list[Path]:
+    """Walks an arbitrary directory tree (e.g. a freshly-extracted mod zip, which might wrap its
+    character in a folder, contain several sibling characters, or have no wrapping folder at all)
+    and returns every folder that is itself a character/bedroom pack. Does not recurse further
+    once a pack root is found, so a pack's own subfolders/asset files are never mistaken for
+    separate packs; a multi-character bundle zip still has every sibling pack discovered."""
+    if _looks_like_pack_root(root):
+        return [root]
+    found: list[Path] = []
+    try:
+        children = [e for e in root.iterdir() if e.is_dir()]
+    except OSError:
+        return found
+    for child in sorted(children, key=lambda p: p.name.lower()):
+        found.extend(find_mod_pack_roots(child))
+    return found
+
+
+def detect_target_mod_system(gamepatcher_exe: Path, game_exe_path: str) -> tuple[str | None, str]:
+    """Runs GamePatcher --check-mod-system against a target game exe. Returns (system, log_text)
+    where system is "Vanilla"/"ModRoomStyle"/None (undetected - a different fork, never guessed)
+    and log_text is the raw output plus any error, suitable for appending straight into a status
+    box."""
+    if not gamepatcher_exe.exists():
+        return None, f"Can't find GamePatcher next to this launcher: {gamepatcher_exe}"
+    try:
+        result = subprocess.run(
+            [str(gamepatcher_exe), game_exe_path, "--check-mod-system"],
+            capture_output=True, text=True, timeout=60,
+        )
+    except Exception as ex:
+        return None, f"Failed to run GamePatcher: {ex}"
+
+    output = (result.stdout or "") + (result.stderr or "")
+    if "System: Vanilla" in output:
+        system = "Vanilla"
+    elif "System: ModRoomStyle" in output:
+        system = "ModRoomStyle"
+    else:
+        system = None
+        output += ("\nCouldn't determine the target's mod system - this may be a different fork "
+                   "with its own scheme. Not safe to assume compatibility.")
+    return system, output
+
+
+def copy_classified_pack(c: ModPackClassification, target_root: Path, target_system: str) -> tuple[bool, str]:
+    """Copies one already-classified portable pack into target_root, laid out the way
+    target_system expects (Vanilla: target_root/custom/<name>; ModRoomStyle:
+    target_root/<custom_futas|custom_wives|custom_bedrooms>/<name>), renaming the data file if the
+    two systems disagree on its extension (wife: .wife <-> .spouse). Returns (True, dest-or-note)
+    on success/skip, (False, reason) on failure. Never touches c.folder - copy only, never move."""
+    if target_system == "Vanilla":
+        dest_root = target_root / "custom"
+    else:
+        dest_root = target_root / KIND_TO_MODROOM_FOLDER[c.kind]
+    dest = dest_root / c.name
+    if dest.exists():
+        return False, f"already exists at {dest}"
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(c.folder, dest)
+
+        expected_name = EXPECTED_DATA_FILENAME.get((c.kind, target_system))
+        rename_note = ""
+        if expected_name and c.data_filename and expected_name.lower() != c.data_filename.lower():
+            (dest / c.data_filename).rename(dest / expected_name)
+            rename_note = f" (renamed {c.data_filename} -> {expected_name})"
+        return True, f"{dest}{rename_note}"
+    except Exception as ex:
+        return False, str(ex)
+
+
 def base_dir() -> Path:
     """Directory this program's own executable/script lives in (where sibling
     ButtplugBridge/GamePatcher/ApkPatcher/settings/profiles.json are expected to be)."""
@@ -512,32 +597,13 @@ class ModCompatibilityDialog(QDialog):
         self._check_target_compatibility(path)
 
     def _check_target_compatibility(self, game_exe_path: str) -> None:
-        if not self._gamepatcher_exe.exists():
-            self._log(f"\nCan't find GamePatcher next to this launcher: {self._gamepatcher_exe}")
-            return
-        try:
-            result = subprocess.run(
-                [str(self._gamepatcher_exe), game_exe_path, "--check-mod-system"],
-                capture_output=True, text=True, timeout=60,
-            )
-        except Exception as ex:
-            self._log(f"\nFailed to run GamePatcher: {ex}")
-            return
-
-        output = (result.stdout or "") + (result.stderr or "")
+        self._target_system, output = detect_target_mod_system(self._gamepatcher_exe, game_exe_path)
         self._log(f"\n--- Target check ---")
         for line in output.splitlines():
             if line.strip():
                 self._log(line)
-
-        if "System: Vanilla" in output:
-            self._target_system = "Vanilla"
-        elif "System: ModRoomStyle" in output:
-            self._target_system = "ModRoomStyle"
-        else:
-            self._target_system = None
-            self._log("\nCouldn't determine the target's mod system - this may be a different "
-                       "fork with its own scheme. Not safe to assume compatibility, so conversion is disabled.")
+        if self._target_system is None:
+            self._log("Conversion is disabled until a game with a recognized mod system is selected.")
 
         portable_count = sum(1 for c in self._classifications if c.portable)
         if self._target_system is not None and portable_count > 0:
@@ -565,33 +631,15 @@ class ModCompatibilityDialog(QDialog):
 
         copied, failed = 0, []
         for c in portable:
-            try:
-                if self._target_system == "Vanilla":
-                    dest_root = self._target_dir / "custom"
-                else:
-                    dest_root = self._target_dir / KIND_TO_MODROOM_FOLDER[c.kind]
-                dest = dest_root / c.name
-                if dest.exists():
-                    self._log(f"Skipped {c.name}: already exists at destination.")
-                    continue
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copytree(c.folder, dest)
-
-                # futa/bedroom data filenames are identical between the two systems, but the
-                # wife-type extension genuinely differs (ModRoom wants .wife, vanilla wants
-                # .spouse - confirmed by reading both games' real GML) - rename if needed so the
-                # TARGET's own loader actually recognizes the copied pack.
-                expected_name = EXPECTED_DATA_FILENAME.get((c.kind, self._target_system))
-                rename_note = ""
-                if expected_name and c.data_filename and expected_name.lower() != c.data_filename.lower():
-                    (dest / c.data_filename).rename(dest / expected_name)
-                    rename_note = f" (renamed {c.data_filename} -> {expected_name})"
-
-                self._log(f"Copied {c.name} -> {dest}{rename_note}")
+            ok, detail = copy_classified_pack(c, self._target_dir, self._target_system)
+            if ok:
+                self._log(f"Copied {c.name} -> {detail}")
                 copied += 1
-            except Exception as ex:
+            elif detail.startswith("already exists"):
+                self._log(f"Skipped {c.name}: {detail}.")
+            else:
                 failed.append(c.name)
-                self._log(f"Failed to copy {c.name}: {ex}")
+                self._log(f"Failed to copy {c.name}: {detail}")
 
         summary = f"Copied {copied} pack(s)."
         if failed:
@@ -628,37 +676,178 @@ def _safe_extract(zf: zipfile.ZipFile, dest: Path) -> None:
     zf.extractall(dest)
 
 
-def install_mod_zip(zip_path: Path, mods_root: Path, category: str) -> tuple[bool, str]:
-    """Extracts a mod zip into mods_root/<category>/<mod name>/. The mod name is the zip's single
-    wrapping top-level folder if it has one (the common case for character/bedroom mods), or
-    otherwise the zip's own filename (dialogue packs and texture packs are often flat)."""
-    with tempfile.TemporaryDirectory() as tmp:
-        tmp_path = Path(tmp)
-        try:
-            with zipfile.ZipFile(zip_path) as zf:
-                _safe_extract(zf, tmp_path)
-        except Exception as ex:
-            return False, f"Couldn't extract {zip_path.name}: {ex}"
+def _flat_mod_source_and_name(tmp_path: Path, zip_path: Path) -> tuple[Path, str]:
+    """Given a zip already extracted to tmp_path, returns (folder to copy, mod name) - the zip's
+    single wrapping top-level folder if it has one (the common case), or otherwise the extraction
+    root itself with the zip's own filename as the name (dialogue packs and texture packs are
+    often flat, with no wrapping folder)."""
+    top_entries = [e for e in tmp_path.iterdir() if e.name not in ("__MACOSX",)]
+    if len(top_entries) == 1 and top_entries[0].is_dir():
+        return top_entries[0], top_entries[0].name
+    return tmp_path, zip_path.stem
 
-        top_entries = [e for e in tmp_path.iterdir() if e.name not in ("__MACOSX",)]
-        if len(top_entries) == 1 and top_entries[0].is_dir():
-            source_dir = top_entries[0]
-            mod_name = top_entries[0].name
+
+def detect_or_ask_category(parent: QWidget, zip_path: Path) -> str | None:
+    """Guesses a mod's category from the filenames inside its zip and asks the user to confirm or
+    correct it. Used as a fallback for zips that don't contain a recognized character/bedroom data
+    file (dialogue packs, texture packs) - those have no reliable auto-detection the way
+    classify_custom_pack() has for character/bedroom packs, so this always asks rather than
+    guessing silently."""
+    try:
+        with zipfile.ZipFile(zip_path) as zf:
+            names = zf.namelist()
+    except Exception as ex:
+        QMessageBox.critical(parent, "Add mods", f"Couldn't read {zip_path.name}:\n{ex}")
+        return None
+
+    guessed = _detect_mod_category(names)
+    keys = list(CATEGORY_FOLDERS.keys())
+    labels = list(CATEGORY_FOLDERS.values())
+    default_index = keys.index(guessed) if guessed else 0
+    guess_text = CATEGORY_FOLDERS[guessed] if guessed else "couldn't guess"
+    label, ok = QInputDialog.getItem(
+        parent, "What kind of mod is this?",
+        f"{zip_path.name}\nAuto-detected: {guess_text}. Pick the right category (or change it):",
+        labels, default_index, editable=False,
+    )
+    if not ok:
+        return None
+    return keys[labels.index(label)]
+
+
+class AutoSortDialog(QDialog):
+    """Batch-processes a pile of downloaded mod zips in one go: for each zip, extracts it, finds
+    every character/bedroom pack inside (however it's wrapped - single character, no wrapping
+    folder at all, or several sibling characters in one bundle zip - see find_mod_pack_roots()),
+    classifies each as portable or not (classify_custom_pack()), and copies the portable ones
+    straight into whatever layout the CURRENTLY CONFIGURED game actually expects (Vanilla's
+    single custom/ folder, or ModRoom-style custom_futas/custom_wives/custom_bedrooms - see
+    detect_target_mod_system()), including the wife .wife<->.spouse rename where the two systems
+    disagree (copy_classified_pack()). Zips with no recognized character/bedroom data file at all
+    fall back to the existing flat category-guess-and-confirm install (dialogue/texture packs,
+    which aren't part of the Vanilla/ModRoom split this converts between).
+
+    Every item gets one of three outcomes, always logged: copied, skipped (already exists), or
+    failed (with the specific reason) - nothing is ever silently dropped or misplaced."""
+
+    def __init__(self, parent: QWidget, gamepatcher_exe: Path, mods_root: Path,
+                 game_exe_path: str | None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Add Mods")
+        self.resize(640, 480)
+
+        self._gamepatcher_exe = gamepatcher_exe
+        self._mods_root = mods_root
+
+        root = QVBoxLayout(self)
+        root.addWidget(QLabel(
+            "Pick one or more mod .zip files - each is unzipped, its character/bedroom packs are "
+            "detected and converted to work with your configured game, and placed in the right "
+            "folder automatically. Dialogue/texture packs (no game-version-specific format) ask "
+            "you to confirm their category, same as before."
+        ))
+
+        self._status_box = QTextEdit()
+        self._status_box.setReadOnly(True)
+        self._status_box.setFontFamily("Consolas" if sys.platform == "win32" else "Monospace")
+        root.addWidget(self._status_box, 1)
+
+        button_row = QHBoxLayout()
+        self._pick_btn = QPushButton("Pick Mod .zip File(s)...")
+        self._pick_btn.clicked.connect(self._pick_and_process)
+        button_row.addWidget(self._pick_btn)
+        button_row.addStretch(1)
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(self.accept)
+        button_row.addWidget(close_btn)
+        root.addLayout(button_row)
+
+        self._log(f"Mods folder: {mods_root}")
+        self._target_system: str | None = None
+        if game_exe_path:
+            self._target_system, output = detect_target_mod_system(gamepatcher_exe, game_exe_path)
+            self._log(f"Target game: {game_exe_path}")
+            for line in output.splitlines():
+                if line.strip():
+                    self._log(f"  {line}")
+        if self._target_system is None:
+            self._log("\nCouldn't determine the current game's mod-folder layout - character/"
+                       "bedroom packs can't be safely placed until Game: (Play tab) points at a "
+                       "recognized install. Dialogue/texture packs can still be added below.")
         else:
-            source_dir = tmp_path
-            mod_name = zip_path.stem
+            self._log(f"\nCharacter/bedroom packs will be sorted into this game's {self._target_system} layout.")
+        self._log("\nClick \"Pick Mod .zip File(s)...\" below to add mods.")
 
-        dest = mods_root / category / mod_name
-        if dest.exists():
-            return False, (f"\"{mod_name}\" already exists in {CATEGORY_FOLDERS[category]} - "
-                            "remove it first, or rename the zip, if you meant to replace it.")
-        try:
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copytree(source_dir, dest)
-        except Exception as ex:
-            return False, f"Couldn't install {zip_path.name}: {ex}"
+    def _log(self, message: str) -> None:
+        self._status_box.append(message)
 
-        return True, f"Added \"{mod_name}\" to {CATEGORY_FOLDERS[category]}."
+    def _pick_and_process(self) -> None:
+        paths, _ = QFileDialog.getOpenFileNames(self, "Select mod .zip file(s)", "", "Zip files (*.zip)")
+        if not paths:
+            return
+
+        copied = skipped = failed = 0
+        for p in paths:
+            zip_path = Path(p)
+            self._log(f"\n=== {zip_path.name} ===")
+            with tempfile.TemporaryDirectory() as tmp:
+                tmp_path = Path(tmp)
+                try:
+                    with zipfile.ZipFile(zip_path) as zf:
+                        _safe_extract(zf, tmp_path)
+                except Exception as ex:
+                    self._log(f"[FAIL] Couldn't extract: {ex}")
+                    failed += 1
+                    continue
+
+                pack_roots = find_mod_pack_roots(tmp_path)
+                if pack_roots:
+                    for pack_folder in pack_roots:
+                        c = classify_custom_pack(pack_folder)
+                        if pack_folder == tmp_path:
+                            # No wrapping folder in the zip at all - use the zip's own name
+                            # instead of the meaningless temp-extraction folder name.
+                            c = ModPackClassification(c.folder, zip_path.stem, c.kind, c.data_filename, c.portable, c.reason)
+                        if self._target_system is None:
+                            self._log(f"[FAIL] {c.name}: no recognized game selected, can't place safely.")
+                            failed += 1
+                            continue
+                        if not c.portable:
+                            self._log(f"[FAIL] {c.name} ({c.kind}): {c.reason}")
+                            failed += 1
+                            continue
+                        ok, detail = copy_classified_pack(c, self._mods_root, self._target_system)
+                        if ok:
+                            self._log(f"[OK] {c.name} -> {detail}")
+                            copied += 1
+                        elif detail.startswith("already exists"):
+                            self._log(f"[SKIP] {c.name}: {detail}")
+                            skipped += 1
+                        else:
+                            self._log(f"[FAIL] {c.name}: {detail}")
+                            failed += 1
+                else:
+                    source_dir, mod_name = _flat_mod_source_and_name(tmp_path, zip_path)
+                    category = detect_or_ask_category(self, zip_path)
+                    if category is None:
+                        self._log("[SKIP] No character/bedroom pack found and no category chosen.")
+                        skipped += 1
+                        continue
+                    dest = self._mods_root / category / mod_name
+                    if dest.exists():
+                        self._log(f"[SKIP] {mod_name}: already exists in {CATEGORY_FOLDERS[category]}.")
+                        skipped += 1
+                        continue
+                    try:
+                        dest.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copytree(source_dir, dest)
+                        self._log(f"[OK] {mod_name} -> {CATEGORY_FOLDERS[category]}")
+                        copied += 1
+                    except Exception as ex:
+                        self._log(f"[FAIL] {mod_name}: {ex}")
+                        failed += 1
+
+        self._log(f"\n=== Done: {copied} copied, {skipped} skipped, {failed} failed. ===")
 
 
 class MainWindow(QMainWindow):
@@ -1187,8 +1376,13 @@ class MainWindow(QMainWindow):
         root.addWidget(self.mods_tree, 1)
 
         button_row = QHBoxLayout()
-        add_mod_btn = QPushButton("Add Mod (.zip)...")
-        add_mod_btn.clicked.connect(self._add_mod_clicked)
+        add_mod_btn = QPushButton("Add Mods (.zip)...")
+        add_mod_btn.setToolTip(
+            "Unzips one or more mod files, detects each character/bedroom pack inside, converts "
+            "it to work with your configured game, and places it in the right folder - all in "
+            "one step. Reports exactly what worked and what didn't."
+        )
+        add_mod_btn.clicked.connect(self._add_mods_clicked)
         button_row.addWidget(add_mod_btn)
         remove_mod_btn = QPushButton("Remove Selected")
         remove_mod_btn.clicked.connect(self._remove_selected_mod)
@@ -1285,49 +1479,13 @@ class MainWindow(QMainWindow):
                 top_item.addChild(child)
         self.mods_tree.expandAll()
 
-    def _detect_or_ask_category(self, zip_path: Path) -> str | None:
-        try:
-            with zipfile.ZipFile(zip_path) as zf:
-                names = zf.namelist()
-        except Exception as ex:
-            QMessageBox.critical(self, "Add mod", f"Couldn't read {zip_path.name}:\n{ex}")
-            return None
-
-        guessed = _detect_mod_category(names)
-        keys = list(CATEGORY_FOLDERS.keys())
-        labels = list(CATEGORY_FOLDERS.values())
-        default_index = keys.index(guessed) if guessed else 0
-        guess_text = CATEGORY_FOLDERS[guessed] if guessed else "couldn't guess"
-        label, ok = QInputDialog.getItem(
-            self, "What kind of mod is this?",
-            f"{zip_path.name}\nAuto-detected: {guess_text}. Pick the right category (or change it):",
-            labels, default_index, editable=False,
-        )
-        if not ok:
-            return None
-        return keys[labels.index(label)]
-
-    def _add_mod_clicked(self) -> None:
+    def _add_mods_clicked(self) -> None:
         mods_root = self._resolve_mods_path(prompt=True)
         if mods_root is None:
             return
-
-        paths, _ = QFileDialog.getOpenFileNames(
-            self, "Select mod .zip file(s)", str(self._base_dir), "Zip files (*.zip)")
-        if not paths:
-            return
-
-        messages: list[str] = []
-        for p in paths:
-            zip_path = Path(p)
-            category = self._detect_or_ask_category(zip_path)
-            if category is None:
-                continue
-            ok, message = install_mod_zip(zip_path, mods_root, category)
-            messages.append(message)
-
-        if messages:
-            self.mods_status_label.setText("\n".join(messages))
+        default_target = self._resolve_game_path(prompt=False)
+        dialog = AutoSortDialog(self, self._patcher_exe, mods_root, default_target)
+        dialog.exec()
         self._refresh_mods_tree()
 
     def _remove_selected_mod(self) -> None:

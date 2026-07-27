@@ -114,23 +114,35 @@ by hand next to the game.
      file manager.
   2. The tree below lists everything currently installed, grouped by
      category, with a count next to each.
-  3. "Add Mod (.zip)..." - pick one or more mod zips (the kind you'd
-     download from Discord). The Launcher looks inside each one and
-     guesses which category it belongs to (by file extension - .wife,
-     .futa, .bedroom, .json, or .png), then asks you to confirm or correct
-     the guess before installing. It never guesses silently.
+  3. "Add Mods (.zip)..." - pick as many mod zips at once as you want (the
+     kind you'd download from Discord - character packs, backgrounds,
+     dialogue, textures, all mixed together is fine). For each one, the
+     Launcher unzips it, looks for a character/bedroom data file inside
+     (however the zip is laid out - one character, several characters
+     bundled in one zip, wrapped in a folder or not), and if it finds one,
+     automatically converts and places it into whatever layout your
+     currently-configured game (Play tab's "Game:") actually expects -
+     including the .wife -> .spouse rename ModRoom-era wife packs need on
+     a vanilla-style target. Packs using the old numbered sprite
+     convention are correctly reported as unconvertible, not silently
+     copied wrong. If a zip has no recognized character/bedroom data file
+     (dialogue/texture packs), it falls back to asking you to confirm the
+     category, same as before. Every item ends up reported as copied,
+     skipped (already installed), or failed (with why) - nothing is ever
+     silently dropped.
   4. "Remove Selected" - deletes the selected mod's folder (or file, for a
      flat dialogue .json). Select a specific mod, not a category header.
   5. "Refresh" - re-scans the mods folder (useful if you added/removed
      something by hand outside the Launcher).
-  6. "Convert ModRoom Characters to This Game..." - brings ModRoom-era
-     character/bedroom packs forward to whatever game you have set under
-     "Game:" (Play tab). Scans your mods folder, reports which packs use
-     the simple, portable file convention vs. the older numbered one that
-     can't be moved without redrawing, then - after you confirm - copies
-     the portable ones into your current game's expected layout (renaming
-     the wife data file from .wife to .spouse automatically where needed).
-     Originals are never modified or moved, only copied.
+  6. "Convert ModRoom Characters to This Game..." - for when you already
+     have an ORGANIZED ModRoom-style mods folder (not fresh zips) you want
+     to bring forward wholesale, e.g. migrating everything out of an old
+     ModRoom install in one go. Scans that folder, reports which packs are
+     portable, then - after you confirm - copies the portable ones into
+     your current game's expected layout. Same underlying conversion as
+     "Add Mods (.zip)..." above, just for an already-unzipped source
+     folder instead of a pile of zips. Originals are never modified or
+     moved, only copied.
 
 ANDROID TAB
 -------------

@@ -50,6 +50,13 @@ mostly a folder layout problem, not a content problem. The Launcher's Mods tab h
 Your original ModRoom mod folders are left untouched - only copies land in the new game's
 `custom/` folder.
 
+For a pile of freshly-downloaded mod zips rather than an already-organized folder, use
+**"Add Mods (.zip)..."** in the same tab instead - pick as many `.zip` files at once as you want,
+and each one is unzipped, its character/bedroom packs are found (single character, several
+bundled together, wrapped or not), converted the same way as above, and placed automatically.
+Every item is reported as copied, skipped, or failed with a reason - nothing is silently dropped
+or misplaced.
+
 ## Building from source
 
 Source only ships here; compiled binaries aren't committed (see `.gitignore`). To build your own:

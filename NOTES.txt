@@ -1540,6 +1540,72 @@ locally. Changes:
     reference-github-repo memory / this file's git-hygiene notes - compiled binaries still never
     go into the repo itself, only into a Release attachment).
 
+AUTO-SORTER FOR BATCHES OF DOWNLOADED MODS (2026-07-27, same day, later): user wants to hand the
+Launcher a whole pile of freshly-downloaded mod zips at once and have it unzip, classify, convert,
+and file each one away correctly, reporting what worked and what didn't - rather than doing it
+one mod at a time by hand. While scoping this, found a REAL latent bug in the existing "Add Mod
+(.zip)..." button: it always extracted into ModRoom-style folders (custom_futas/custom_wives/
+custom_bedrooms) regardless of what layout the actually-configured game expects - for a
+vanilla-style target (single custom/ folder, this install's real layout), mods added that way
+silently landed somewhere func_load_custom never scans. Fixed as part of this work; the new
+feature replaces "Add Mod (.zip)..." outright (user's explicit choice when asked) rather than
+existing alongside the old, bug-prone button.
+
+  ToyLauncherQt\main.py changes:
+  - New find_mod_pack_roots(root): walks an arbitrary extracted-zip tree and returns every folder
+    that IS a character/bedroom pack (contains a recognized custom_data.* file), without
+    recursing further once found - so multi-character bundle zips get every sibling discovered,
+    single-character zips (wrapped in a folder or not) are handled too, and a pack's own asset
+    subfolders never get mistaken for separate packs.
+  - Extracted copy_classified_pack() and detect_target_mod_system() out of
+    ModCompatibilityDialog's per-pack copy loop and its GamePatcher --check-mod-system call
+    respectively - both are now standalone functions shared by ModCompatibilityDialog AND the new
+    AutoSortDialog, so there's exactly one copy of the copy+rename logic and exactly one copy of
+    the target-detection logic, not two independently-maintained versions.
+  - New AutoSortDialog: pick one or more zips at once; each is extracted, scanned with
+    find_mod_pack_roots, every pack found is classified and - if portable - copied+renamed via
+    copy_classified_pack into whatever layout the CURRENTLY CONFIGURED game (Play tab's Game:)
+    actually expects (auto-detected once via detect_target_mod_system, same default-to-current-
+    game approach as the converter). Zips with no recognized character/bedroom data file fall
+    back to the pre-existing category-guess-and-confirm flow (dialogue/texture packs, which
+    aren't part of the verified Vanilla/ModRoom conversion story - deliberately left unchanged).
+    Every item is logged as [OK]/[SKIP]/[FAIL] with a reason, plus a final totals line - "let the
+    user know which ones will fail or did fail" was the explicit ask.
+  - install_mod_zip() and MainWindow._detect_or_ask_category()/_add_mod_clicked() deleted (dead
+    code once the button was replaced); the category-guess-and-confirm logic itself survives as
+    the standalone detect_or_ask_category() function, now called from AutoSortDialog's fallback
+    path.
+
+  REAL verification, not just "it built" (matches this project's standing bar): built 5 synthetic
+  test zips from real ModRoom packs already on disk (vivian - simple wrapped futa; Momo
+  Yaoyorozu - simple wrapped wife, to re-confirm the .wife->.spouse rename path; custom_futa_
+  template - old numbered convention, to confirm the failure path still gets caught and reported;
+  heaven's contents zipped with NO wrapping folder, to test the zip-stem naming path; a bundle zip
+  with two sibling character folders under one wrapping folder, to test multi-pack discovery in
+  one zip). Ran them through the actual AutoSortDialog code path (direct calls to the real
+  find_mod_pack_roots/classify_custom_pack/copy_classified_pack/detect_target_mod_system
+  functions - same approach as this session's earlier real conversion test) against a SCRATCH copy
+  of the vanilla install (not the real wifes_bedroom_win\, so this didn't collide with real state).
+  Result matched expectations exactly: 5 copied, 1 correctly failed (old convention) with the
+  right reason, both sibling packs in the bundle zip discovered, the no-wrapping-folder zip
+  correctly named from its own filename. Ran the identical batch a SECOND time to prove the
+  already-exists path: all 5 previously-copied packs correctly reported [SKIP], the 1 failure
+  still correctly [FAIL] - confirms idempotent re-runs never silently overwrite. Then launched the
+  real wifes_bedroom.exe against that scratch install with console output captured: "custom folder
+  detected", all 5 sorted packs show a "loading .../custom/<name>" line, zero "missing files"
+  warnings.
+
+  NOT manually exercised: the actual QInputDialog category-confirm popup for the dialogue/
+  texture-pack fallback path (needs a live GUI session to click through) - the code path itself
+  (detect_or_ask_category, _flat_mod_source_and_name) is unchanged from the pre-existing, already-
+  used Add Mod flow, just moved to be callable from the new dialog, so this is a lower-risk gap
+  than the character/bedroom conversion path which WAS fully verified above.
+
+  Rebuilt/redeployed ToyLauncher.exe (onedir) to wifes_bedroom_win\, buttplug-mod\, and
+  shareable\ (ModRoom V3.2's install still intentionally not touched), rebuilt the Windows
+  installer - no GamePatcher/ApkPatcher/HmvLive/ButtplugBridge changes this round, confirmed their
+  staged copies were still byte-identical to source before compiling.
+
 SHARING THIS MOD
 -------------------
 Do NOT share the patched data.win directly - it contains the entire
