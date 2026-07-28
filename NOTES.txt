@@ -1706,6 +1706,50 @@ the user's REAL WB-ModRoom ".6" download for real (backed up first, confirmed Al
 after), and launched THAT actual install directly - clean boot, zero errors, toy support is now
 genuinely present in that build. Rebuilt the installer with the refreshed staged exes.
 
+TOUCH-CONTROLS PATCH MADE FORK-TOLERANT (2026-07-27, same day, later still): user then tried the
+SAME WB-ModRoom ".6" fork through ApkPatcher's Android touch-controls fix and it reported
+NotSupported ("Couldn't find the expected mouse-wheel menu code"). Investigated the same way as
+the decompiler bug above - real decompile+diff, not guessing.
+
+Found TWO separate, genuine structural differences from what this patch expected (both confirmed
+by decompiling this fork's actual code, byte-for-byte against the known-working ModRoom V3.2
+patterns):
+  - menu_scroll_update's mouse-wheel line is `mouse_wheel_up() - mouse_wheel_down()` in this fork
+    vs. `mouse_wheel_down() - mouse_wheel_up()` everywhere else seen - a deliberate scroll-
+    direction choice by this fork's author, not a bug. Confirmed via diff that this is the ONLY
+    difference in that whole function.
+  - The right-click check this patch looks for (`mouse_check_button_pressed(2)`) doesn't exist
+    ANYWHERE in this fork's Step_0 at all - it's been restructured around
+    `mouse_check_button_released(2)` in a different surrounding context. This is a real, bigger
+    structural change, not just a reordering - patching it safely would need understanding that
+    new structure first.
+
+Asked the user how to scope this given the very different risk levels of the two pieces. Chose to
+fix the scroll-wheel part (fully understood, provably safe) and explicitly leave right-click alone
+rather than guess at the restructured code.
+
+Implementation (`GamePatcher.cs`, mirrored to `ApkPatcher/` as always):
+  - Added MenuScrollOriginalFlipped/MenuScrollReplacementFlipped - a second recognized variant of
+    menu_scroll_update that preserves THIS fork's existing wheel direction (never silently
+    "corrects" it) while adding the same drag-to-scroll behavior as the original patch.
+  - Changed CheckTouchControlsStatus/PatchTouchControls so scroll-drag and right-click long-press
+    are each independent/best-effort (same philosophy already used for the custom-character-
+    discovery and pill-menu fixes) instead of an all-or-nothing gate - a build now only needs ONE
+    of the two patterns present to be considered compatible and get SOME of this patch's benefit,
+    since real forks can restructure one piece without the other. The result message now says
+    explicitly which pieces were actually applied and which were skipped and why - never silent.
+
+Verified for real: patched a scratch copy of the fork's pristine .bak, confirmed via --dump-code
+that the wheel direction was preserved exactly (still `mouse_wheel_up() - mouse_wheel_down()`) with
+drag-to-scroll added on top, then a real launch - clean boot, "showed tutorial"/"saved game" lines
+proving it ran well past startup into actual gameplay, zero errors. Re-verified ModRoom V3.2 (the
+already-working case, which has BOTH patterns) still gets both scroll-drag AND right-click applied
+exactly as before - no regression from making the gate best-effort. Rebuilt/redeployed GamePatcher.
+exe/ApkPatcher.exe to all 5 locations again, then applied the real patch (alongside the already-
+applied telemetry patch) to the user's actual WB-ModRoom ".6" install and launched it directly -
+clean boot, zero errors, both patches genuinely active together on that real install. Rebuilt the
+installer.
+
 SHARING THIS MOD
 -------------------
 Do NOT share the patched data.win directly - it contains the entire

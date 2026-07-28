@@ -631,6 +631,70 @@ static class GamePatcher
         "    }\n" +
         "}";
 
+    // A second known variant of the SAME function, found on a different, actively-developed fork
+    // (WB-ModRoom "Release 1", 2026-07-27) - confirmed by direct decompile+diff that this is the
+    // ONLY difference from MenuScrollOriginal above: the wheel-direction subtraction is reversed
+    // (that fork's own choice of scroll direction). The replacement below preserves that exact
+    // same direction rather than silently flipping it back - only the drag-to-scroll addition is
+    // new behavior, matching this patch's "only ever ADDS, never changes existing behavior" rule.
+    private const string MenuScrollOriginalFlipped =
+        "function menu_scroll_update(arg0, arg1, arg2)\n" +
+        "{\n" +
+        "    if (mouse_wheel_up() || mouse_wheel_down())\n" +
+        "    {\n" +
+        "        arg0.scroll += mouse_wheel_up() - mouse_wheel_down();\n" +
+        "        arg0.scroll = median(arg0.scroll, 0, max(0, arg1 - arg2));\n" +
+        "    }\n" +
+        "    arg0.scroll_lerp = lerp(arg0.scroll_lerp, arg0.scroll, 1);\n" +
+        "    if (abs(arg0.scroll - arg0.scroll_lerp) < 0.01)\n" +
+        "    {\n" +
+        "        arg0.scroll_lerp = arg0.scroll;\n" +
+        "    }\n" +
+        "}";
+    private const string MenuScrollReplacementFlipped =
+        "function menu_scroll_update(arg0, arg1, arg2)\n" +
+        "{\n" +
+        "    if (mouse_wheel_up() || mouse_wheel_down())\n" +
+        "    {\n" +
+        "        arg0.scroll += mouse_wheel_up() - mouse_wheel_down();\n" +
+        "        arg0.scroll = median(arg0.scroll, 0, max(0, arg1 - arg2));\n" +
+        "    }\n" +
+        "    if (mouse_check_button(mb_left))\n" +
+        "    {\n" +
+        "        if (!variable_struct_exists(arg0, \"touch_drag_last_y\"))\n" +
+        "        {\n" +
+        "            arg0.touch_drag_last_y = mouse_y;\n" +
+        "            arg0.touch_drag_accum = 0;\n" +
+        "        }\n" +
+        "        else\n" +
+        "        {\n" +
+        "            arg0.touch_drag_accum += (mouse_y - arg0.touch_drag_last_y);\n" +
+        "            arg0.touch_drag_last_y = mouse_y;\n" +
+        "            var _row_height = 64;\n" +
+        "            while (arg0.touch_drag_accum <= -_row_height)\n" +
+        "            {\n" +
+        "                arg0.scroll -= 1;\n" +
+        "                arg0.touch_drag_accum += _row_height;\n" +
+        "            }\n" +
+        "            while (arg0.touch_drag_accum >= _row_height)\n" +
+        "            {\n" +
+        "                arg0.scroll += 1;\n" +
+        "                arg0.touch_drag_accum -= _row_height;\n" +
+        "            }\n" +
+        "            arg0.scroll = median(arg0.scroll, 0, max(0, arg1 - arg2));\n" +
+        "        }\n" +
+        "    }\n" +
+        "    else if (variable_struct_exists(arg0, \"touch_drag_last_y\"))\n" +
+        "    {\n" +
+        "        variable_struct_remove(arg0, \"touch_drag_last_y\");\n" +
+        "    }\n" +
+        "    arg0.scroll_lerp = lerp(arg0.scroll_lerp, arg0.scroll, 1);\n" +
+        "    if (abs(arg0.scroll - arg0.scroll_lerp) < 0.01)\n" +
+        "    {\n" +
+        "        arg0.scroll_lerp = arg0.scroll;\n" +
+        "    }\n" +
+        "}";
+
     // Custom character discovery fix - a SEPARATE real bug from the touch-input one above, found
     // by reading this exact code: file_find_first (directory ENUMERATION) is well-documented not
     // to work against files bundled inside an Android APK - only opening a file by an already-
@@ -915,13 +979,28 @@ static class GamePatcher
             {
                 return (true, true, "Already patched.");
             }
-            if (!createText.Contains(MenuScrollOriginal))
+
+            // Scroll-drag and right-click long-press are each patched independently below (best-
+            // effort, same philosophy as the custom-character-discovery/pill-menu fixes further
+            // down) - a build only needs ONE of the two known patterns present to be considered
+            // compatible, since a fork may have restructured one but not the other (confirmed
+            // happening in practice - WB-ModRoom "Release 1" has a scroll-update variant but a
+            // completely restructured right-click check).
+            bool hasScroll = createText.Contains(MenuScrollOriginal) || createText.Contains(MenuScrollOriginalFlipped);
+            string stepText = new DecompileContext(globalContext, stepCode, settings).DecompileToString();
+            bool hasRightClick = stepText.Contains(RightClickMarker1) && stepText.Contains(RightClickMarker2);
+
+            if (!hasScroll && !hasRightClick)
             {
                 return (false, false,
-                    "Couldn't find the expected mouse-wheel menu code (menu_scroll_update) - this is specific " +
-                    "to ModRoom's own right-click/scroll-wheel controls, and may not apply to this game/version.");
+                    "Couldn't find the expected mouse-wheel menu code or right-click code - this is specific " +
+                    "to ModRoom-style right-click/scroll-wheel controls, and may not apply to this game/version.");
             }
-            return (true, false, "Compatible, not yet patched.");
+
+            string detail = "Compatible, not yet patched.";
+            if (!hasScroll) detail += " (Scroll-drag touch equivalent isn't available on this build - only right-click long-press will be added.)";
+            if (!hasRightClick) detail += " (Right-click long-press touch equivalent isn't available on this build - only scroll-drag will be added.)";
+            return (true, false, detail);
         }
         catch (Exception ex)
         {
@@ -966,22 +1045,33 @@ static class GamePatcher
                 return new PatchOutcome(PatchResult.NotSupported,
                     "Couldn't find the expected code in the Create event - this game's version may not be compatible.");
             }
-            if (!createText.Contains(MenuScrollOriginal))
-            {
-                return new PatchOutcome(PatchResult.NotSupported,
-                    "Couldn't find the expected mouse-wheel menu code (menu_scroll_update) - this is specific to " +
-                    "ModRoom's own right-click/scroll-wheel controls, and may not apply to this game/version.");
-            }
+
+            // Scroll-drag (Create_0's menu_scroll_update) and right-click long-press (Step_0) are
+            // each best-effort/independent, same philosophy as futaScan/wifeScan/pillMenu below -
+            // a fork may have restructured one but not the other (confirmed happening in practice:
+            // WB-ModRoom "Release 1" has a scroll-update variant - see MenuScrollOriginalFlipped -
+            // but a completely restructured right-click check this patch doesn't recognize at
+            // all). Only fail outright if NEITHER piece has anything to patch.
+            bool scrollFlipped = !createText.Contains(MenuScrollOriginal) && createText.Contains(MenuScrollOriginalFlipped);
+            bool scrollPatched = createText.Contains(MenuScrollOriginal) || createText.Contains(MenuScrollOriginalFlipped);
 
             string stepText = new DecompileContext(globalContext, stepCode, settings).DecompileToString();
-            if (!stepText.Contains(RightClickMarker1) || !stepText.Contains(RightClickMarker2))
+            bool rightClickPatched = stepText.Contains(RightClickMarker1) && stepText.Contains(RightClickMarker2);
+
+            if (!scrollPatched && !rightClickPatched)
             {
                 return new PatchOutcome(PatchResult.NotSupported,
-                    "Couldn't find the expected right-click code in the Step event - this game's version may not be compatible.");
+                    "Couldn't find the expected mouse-wheel menu code or right-click code - this is specific to " +
+                    "ModRoom-style right-click/scroll-wheel controls, and may not apply to this game/version.");
             }
 
             createText = createText.Replace(TouchCreateMarker, TouchCreateMarker + TouchCreatePatch);
-            createText = createText.Replace(MenuScrollOriginal, MenuScrollReplacement);
+            if (scrollPatched)
+            {
+                createText = scrollFlipped
+                    ? createText.Replace(MenuScrollOriginalFlipped, MenuScrollReplacementFlipped)
+                    : createText.Replace(MenuScrollOriginal, MenuScrollReplacement);
+            }
 
             // Best-effort, not required: if this exact code isn't found (a different ModRoom
             // version, say), the touch-input fix above still applies fine on its own - this just
@@ -1009,10 +1099,15 @@ static class GamePatcher
                 }
             }
 
-            stepText = stepText.Replace(RightClickMarker1, RightClickReplacement1);
-            stepText = stepText.Replace(RightClickMarker2, RightClickReplacement2);
+            // Right-click long-press is only wired up (and its tracking-state prepend added) when
+            // the expected pattern was actually found - see scrollPatched/rightClickPatched above.
+            if (rightClickPatched)
+            {
+                stepText = stepText.Replace(RightClickMarker1, RightClickReplacement1);
+                stepText = stepText.Replace(RightClickMarker2, RightClickReplacement2);
+            }
             if (pillMenuPatched) stepText = stepText.Replace(PillMenuScrollUpdateMarker, PillMenuScrollUpdateReplacement);
-            stepText = TouchStepPrepend + stepText;
+            if (rightClickPatched) stepText = TouchStepPrepend + stepText;
 
             var importGroup = new CodeImportGroup(data) { AutoCreateAssets = false };
             importGroup.QueueReplace(CreateEventName, createText);
@@ -1025,6 +1120,12 @@ static class GamePatcher
                 UndertaleIO.Write(outStream, data);
             }
 
+            string scrollNote = scrollPatched
+                ? " Scroll-drag added for menus."
+                : " Scroll-wheel menu code didn't match what was expected, so scroll-drag was skipped.";
+            string rightClickNote = rightClickPatched
+                ? " Long-press added as a right-click equivalent."
+                : " Right-click code didn't match what was expected, so long-press was skipped.";
             string scanNote = (futaScanPatched || wifeScanPatched)
                 ? $" Also fixed custom character discovery on Android (futas: {futaScanPatched}, wives: {wifeScanPatched})."
                 : " Custom character discovery code didn't match what was expected, so that part was skipped - touch controls were still patched.";
@@ -1032,7 +1133,7 @@ static class GamePatcher
                 ? " Pill menu is now laid out as two columns of 7 (no scrolling needed, nothing can run off-screen)."
                 : " Pill menu code didn't match what was expected (or this game has no pill menu), so that part was skipped.";
             return new PatchOutcome(PatchResult.Patched,
-                $"Touch controls patched successfully!{scanNote}{pillNote} A backup of the original was saved as:\n{backupPath}");
+                $"Touch controls patched successfully!{scrollNote}{rightClickNote}{scanNote}{pillNote} A backup of the original was saved as:\n{backupPath}");
         }
         catch (Exception ex)
         {
