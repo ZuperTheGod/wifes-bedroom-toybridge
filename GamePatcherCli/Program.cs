@@ -67,6 +67,14 @@ if (args.Length < 1 || args[0] is "-h" or "--help")
     Console.WriteLine("                      portrait-swap button to cycle) and click-scroll arrows for the");
     Console.WriteLine("                      custom character list. Specific to this vanilla install's own");
     Console.WriteLine("                      func_load_custom - not ModRoom-style builds.");
+    Console.WriteLine("  --android-custom-discovery");
+    Console.WriteLine("                      apply the Android custom-character-discovery patch instead of the");
+    Console.WriteLine("                      toy telemetry patch - vanilla's own discovery code never runs on");
+    Console.WriteLine("                      mobile at all (confirmed by decompiling it), so bundled custom");
+    Console.WriteLine("                      characters were never found there even when correctly bundled.");
+    Console.WriteLine("                      This makes them discoverable via a manifest (written by");
+    Console.WriteLine("                      ApkPatcher --include-mods). Independent of --custom-alts - apply");
+    Console.WriteLine("                      both if wanted, same 2-pass --replace-data chaining as usual.");
     return args.Length < 1 ? 1 : 0;
 }
 
@@ -76,6 +84,7 @@ bool skipConfirm = args.Contains("--yes");
 bool hmvMode = args.Contains("--hmv");
 bool touchControlsMode = args.Contains("--touch-controls");
 bool customAltsMode = args.Contains("--custom-alts");
+bool androidCustomDiscoveryMode = args.Contains("--android-custom-discovery");
 bool checkModSystem = args.Contains("--check-mod-system");
 bool dumpVersion = args.Contains("--dump-version");
 int dumpCodeIdx = Array.IndexOf(args, "--dump-code");
@@ -134,6 +143,18 @@ if (dumpPropsIdx >= 0)
     return 0;
 }
 
+int findRefsIdx = Array.IndexOf(args, "--find-code");
+if (findRefsIdx >= 0)
+{
+    if (findRefsIdx + 1 >= args.Length)
+    {
+        Console.WriteLine("Usage: GamePatcher <path> --find-code <substring>");
+        return 1;
+    }
+    Console.WriteLine(GamePatcher.FindCodeReferences(dataPath, args[findRefsIdx + 1]));
+    return 0;
+}
+
 if (touchAllCode)
 {
     Console.WriteLine("This can take a while for a large data file (decompiling+recompiling every code entry)...");
@@ -151,6 +172,7 @@ if (checkModSystem)
 var status = hmvMode ? GamePatcher.CheckHmvStatus(dataPath)
     : touchControlsMode ? GamePatcher.CheckTouchControlsStatus(dataPath)
     : customAltsMode ? GamePatcher.CheckCustomAltsStatus(dataPath)
+    : androidCustomDiscoveryMode ? GamePatcher.CheckAndroidCustomDiscoveryStatus(dataPath)
     : GamePatcher.CheckStatus(dataPath);
 Console.WriteLine($"Compatible: {status.Compatible}   Already patched: {status.AlreadyPatched}   ({status.Detail})");
 
@@ -185,6 +207,7 @@ if (!skipConfirm)
 var outcome = hmvMode ? GamePatcher.PatchHmv(dataPath)
     : touchControlsMode ? GamePatcher.PatchTouchControls(dataPath)
     : customAltsMode ? GamePatcher.PatchCustomAlts(dataPath)
+    : androidCustomDiscoveryMode ? GamePatcher.PatchAndroidCustomDiscovery(dataPath)
     : GamePatcher.Patch(dataPath);
 Console.WriteLine($"{outcome.Result}: {outcome.Message}");
 return outcome.Result is GamePatcher.PatchResult.Patched or GamePatcher.PatchResult.AlreadyPatched ? 0 : 1;

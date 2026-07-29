@@ -367,6 +367,62 @@ static class GamePatcher
         }
     }
 
+    // Read-only diagnostic: decompiles every top-level code entry and reports which ones contain
+    // the given substring - useful for finding every place a variable/function is referenced
+    // across the whole game without guessing at event names.
+    public static string FindCodeReferences(string dataWinPath, string substring)
+    {
+        try
+        {
+            UndertaleData data;
+            using (var stream = new FileStream(dataWinPath, FileMode.Open, FileAccess.Read))
+            {
+                data = UndertaleIO.Read(stream);
+            }
+
+            var globalContext = new GlobalDecompileContext(data);
+            var settings = data.ToolInfo.DecompilerSettings;
+
+            var topLevelNames = data.Code
+                .Where(c => c is not null && c.Name?.Content is not null && c.ParentEntry is null)
+                .Select(c => c!.Name!.Content!)
+                .Distinct()
+                .ToList();
+
+            var matches = new List<string>();
+            var failures = new List<(string Name, string Error)>();
+            foreach (var name in topLevelNames)
+            {
+                var code = data.Code.First(c => c is not null && c.Name?.Content == name);
+                try
+                {
+                    string text = new DecompileContext(globalContext, code, settings).DecompileToString();
+                    if (text.Contains(substring))
+                    {
+                        matches.Add(name);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    failures.Add((name, ex.Message));
+                }
+            }
+
+            string result = $"Searched {topLevelNames.Count} top-level code entries for \"{substring}\":\n" +
+                             string.Join("\n", matches.Select(m => $"  {m}"));
+            if (failures.Count > 0)
+            {
+                result += $"\n({failures.Count} entries failed to decompile and were skipped)";
+            }
+            return result;
+        }
+        catch (Exception ex)
+        {
+            return $"Error: {ex.Message}";
+        }
+    }
+
+
     public static PatchOutcome Patch(string dataWinPath)
     {
         try
@@ -1738,6 +1794,186 @@ static class GamePatcher
         catch (Exception ex)
         {
             return new PatchOutcome(PatchResult.Error, $"Something went wrong while patching custom alts: {ex.Message}");
+        }
+    }
+
+    // ================================================================================
+    // ANDROID CUSTOM CHARACTER DISCOVERY (vanilla) - a SEPARATE, independent patch from
+    // --custom-alts above (not folded into it, so it can be applied to an install that already
+    // has --custom-alts patched, without needing to re-detect/re-apply that first).
+    //
+    // Real gap found 2026-07-29: vanilla's OWN custom-character discovery code is wrapped in
+    // "if (mobile == false)" - on Android it does not run AT ALL, regardless of anything bundled
+    // into the APK (confirmed by decompiling and reading the actual condition, not assumed). This
+    // isn't something we broke - the base game apparently never shipped Android support for
+    // custom characters, likely for the same reason ModRoom's own enumeration-based discovery
+    // doesn't work on Android either (GameMaker's file_find_first/directory_exists don't work
+    // against files bundled inside an APK - the exact same limitation --touch-controls's
+    // custom-character-discovery fix already works around for ModRoom's check_custom_futa system,
+    // via a manifest instead of enumeration). This patch does the equivalent for VANILLA's own
+    // func_load_custom-based system: reads a manifest (assets/custom/_manifest.txt, written by
+    // ApkPatcher's --include-mods when bundling a "custom" folder - see Program.cs) and, for each
+    // listed name, runs the EXACT SAME per-folder logic the existing PC-only discovery loop
+    // already uses (func_load_custom + switch on custom_load_type) - reusing that logic verbatim,
+    // only the SOURCE of the folder-name list changes from enumeration to a manifest.
+    private const string AndroidCustomDiscoveryMarker =
+        "    if (ds_list_size(custom_lover_folders) > 0 || ds_list_size(custom_partner_folders) > 0 || ds_list_size(custom_bedroom_folders) > 0)\n" +
+        "    {\n" +
+        "        custom_sprite_loaded = true;\n" +
+        "        tutorial = false;\n" +
+        "    }\n" +
+        "}\n";
+    // NOTE: this deliberately does NOT gate on the game's own "mobile" variable, and deliberately
+    // does NOT chain onto the existing block as "else if" either - decompiling confirmed:
+    // (1) "mobile" is hardcoded to `mobile = false;` at the top of this same event and never
+    //     reassigned anywhere else in the entire data file (checked every top-level code entry),
+    //     so `mobile == true` can never be reached on any platform, PC or Android.
+    // (2) BECAUSE of (1), the existing PC block's own condition (`mobile == false`) is ALWAYS
+    //     true, on every platform - which means an "else if" attached to it could NEVER run
+    //     either, no matter what condition it checked, since the first branch of an if/else-if
+    //     always wins once true. A standalone "if" below is required so this really runs
+    //     independently, using the real engine-provided os_type constant to detect the platform.
+    private const string AndroidCustomDiscoveryReplacement =
+        AndroidCustomDiscoveryMarker +
+        "if (os_type == os_android || os_type == os_ios)\n" +
+        "{\n" +
+        // working_directory already ends with a trailing slash on Android ("assets/") but not on
+        // PC ("C:\...\game_folder") - appending "/custom/..." unconditionally would produce a
+        // double slash ("assets//custom/...") on Android, which file_exists() fails to resolve.
+        // Stripping any trailing slash first makes this work regardless of platform convention.
+        "    var _acd_wd = working_directory;\n" +
+        "    if (string_char_at(_acd_wd, string_length(_acd_wd)) == \"/\")\n" +
+        "    {\n" +
+        "        _acd_wd = string_copy(_acd_wd, 1, string_length(_acd_wd) - 1);\n" +
+        "    }\n" +
+        "    var _acd_manifest_path = _acd_wd + \"/custom/_manifest.txt\";\n" +
+        "    if (file_exists(_acd_manifest_path))\n" +
+        "    {\n" +
+        "        var _acd_mf = file_text_open_read(_acd_manifest_path);\n" +
+        "        while (!file_text_eof(_acd_mf))\n" +
+        "        {\n" +
+        "            var _acd_line = string_replace_all(string_replace_all(file_text_readln(_acd_mf), \"\\r\", \"\"), \"\\n\", \"\");\n" +
+        "            if (_acd_line != \"\")\n" +
+        "            {\n" +
+        "                var _acd_file = _acd_wd + \"/custom/\" + _acd_line;\n" +
+        "                func_load_custom(_acd_file, -1);\n" +
+        "                switch (custom_load_type)\n" +
+        "                {\n" +
+        "                    case UnknownEnum.Value_1:\n" +
+        "                        ds_list_add(custom_lover_folders, _acd_file);\n" +
+        "                        break;\n" +
+        "                    case UnknownEnum.Value_2:\n" +
+        "                        ds_list_add(custom_partner_folders, _acd_file);\n" +
+        "                        break;\n" +
+        "                    case UnknownEnum.Value_3:\n" +
+        "                        ds_list_add(custom_bedroom_folders, _acd_file);\n" +
+        "                        break;\n" +
+        "                }\n" +
+        "            }\n" +
+        "        }\n" +
+        "        file_text_close(_acd_mf);\n" +
+        "        if (ds_list_size(custom_lover_folders) > 0 || ds_list_size(custom_partner_folders) > 0 || ds_list_size(custom_bedroom_folders) > 0)\n" +
+        "        {\n" +
+        "            custom_sprite_loaded = true;\n" +
+        "            tutorial = false;\n" +
+        "        }\n" +
+        "    }\n" +
+        "}\n";
+
+    public static (bool Compatible, bool AlreadyPatched, string Detail) CheckAndroidCustomDiscoveryStatus(string dataWinPath)
+    {
+        try
+        {
+            UndertaleData data;
+            using (var stream = new FileStream(dataWinPath, FileMode.Open, FileAccess.Read))
+            {
+                data = UndertaleIO.Read(stream);
+            }
+
+            var createCode = data.Code.FirstOrDefault(c => c is not null && c.Name?.Content == CreateEventName);
+            if (createCode is null)
+            {
+                return (false, false, "Not a compatible game (missing oFutaMatingPress).");
+            }
+
+            var globalContext = new GlobalDecompileContext(data);
+            var settings = data.ToolInfo.DecompilerSettings;
+            string createText = new DecompileContext(globalContext, createCode, settings).DecompileToString();
+            if (createText.Contains("_acd_manifest_path"))
+            {
+                return (true, true, "Already patched.");
+            }
+            if (!createText.Contains(AndroidCustomDiscoveryMarker))
+            {
+                return (false, false,
+                    "Couldn't find the expected custom-character discovery code in the Create event - this " +
+                    "is specific to this vanilla install's own func_load_custom-based discovery, not " +
+                    "ModRoom-style builds (which already get Android discovery support via --touch-controls).");
+            }
+            return (true, false, "Compatible, not yet patched.");
+        }
+        catch (Exception ex)
+        {
+            return (false, false, $"Couldn't check: {ex.Message}");
+        }
+    }
+
+    public static PatchOutcome PatchAndroidCustomDiscovery(string dataWinPath)
+    {
+        try
+        {
+            string backupPath = dataWinPath + ".bak";
+            if (!File.Exists(backupPath))
+            {
+                File.Copy(dataWinPath, backupPath);
+            }
+
+            UndertaleData data;
+            using (var stream = new FileStream(dataWinPath, FileMode.Open, FileAccess.Read))
+            {
+                data = UndertaleIO.Read(stream);
+            }
+
+            var createCode = data.Code.FirstOrDefault(c => c is not null && c.Name?.Content == CreateEventName);
+            if (createCode is null)
+            {
+                return new PatchOutcome(PatchResult.NotSupported,
+                    "This doesn't look like a compatible game (missing oFutaMatingPress).");
+            }
+
+            var globalContext = new GlobalDecompileContext(data);
+            var settings = data.ToolInfo.DecompilerSettings;
+            string createText = new DecompileContext(globalContext, createCode, settings).DecompileToString();
+            if (createText.Contains("_acd_manifest_path"))
+            {
+                return new PatchOutcome(PatchResult.AlreadyPatched, "Android custom character discovery is already patched in - nothing to do.");
+            }
+            if (!createText.Contains(AndroidCustomDiscoveryMarker))
+            {
+                return new PatchOutcome(PatchResult.NotSupported,
+                    "Couldn't find the expected custom-character discovery code in the Create event - this " +
+                    "game's version may not be compatible.");
+            }
+
+            createText = createText.Replace(AndroidCustomDiscoveryMarker, AndroidCustomDiscoveryReplacement);
+
+            var importGroup = new CodeImportGroup(data) { AutoCreateAssets = false };
+            importGroup.QueueReplace(CreateEventName, createText);
+            importGroup.Import();
+
+            using (var outStream = new FileStream(dataWinPath, FileMode.Create, FileAccess.Write))
+            {
+                UndertaleIO.Write(outStream, data);
+            }
+
+            return new PatchOutcome(PatchResult.Patched,
+                "Android custom character discovery patched successfully! On Android, characters bundled " +
+                "into assets/custom/ (via ApkPatcher --include-mods, with a manifest) will now actually be " +
+                $"found and loaded - previously vanilla's own discovery code never ran on mobile at all. A backup of the original was saved as:\n{backupPath}");
+        }
+        catch (Exception ex)
+        {
+            return new PatchOutcome(PatchResult.Error, $"Something went wrong while patching Android custom discovery: {ex.Message}");
         }
     }
 

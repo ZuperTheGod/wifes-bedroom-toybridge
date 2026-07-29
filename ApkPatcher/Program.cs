@@ -13,21 +13,25 @@
 // have. Whenever the mod updates, just re-run this against the new data.win to get a fresh APK.
 //
 // --include-mods lets you bundle a PC mod's external content folders (custom_wives, custom_futas,
-// custom_bedrooms, dialogue_packs, texture_packs) into the APK too. This is required for those to
-// work at all on Android - confirmed (by patching in a one-line diagnostic that logs
-// working_directory) that GameMaker's working_directory on Android resolves to the APK's own
-// bundled assets/ folder, a read-only location baked in at build time - there is no writable
-// "next to the exe" folder the way there is on PC, so anything the game would normally read from
-// those folders has to be packaged into the APK itself. Point --include-mods at whatever folder
-// directly contains those subfolders (e.g. your ModRoom install folder) and each is copied in
-// under assets/<foldername>/... whichever of the five exist. Every caller supplies their own mod
-// content this way - nothing about anyone's specific mods ships with this tool.
+// custom_bedrooms, dialogue_packs, texture_packs, or vanilla's own flat "custom" folder) into the
+// APK too. This is required for those to work at all on Android - confirmed (by patching in a
+// one-line diagnostic that logs working_directory) that GameMaker's working_directory on Android
+// resolves to the APK's own bundled assets/ folder, a read-only location baked in at build time -
+// there is no writable "next to the exe" folder the way there is on PC, so anything the game would
+// normally read from those folders has to be packaged into the APK itself. Point --include-mods at
+// whatever folder directly contains those subfolders (e.g. your ModRoom install folder, or a
+// vanilla install's own folder for its "custom" subfolder) and each is copied in under
+// assets/<foldername>/... whichever of the six exist. Every caller supplies their own mod content
+// this way - nothing about anyone's specific mods ships with this tool. For vanilla's "custom"
+// folder specifically, the target game's data.win ALSO needs GamePatcher's
+// --android-custom-discovery patch applied for these to actually be discovered on Android - vanilla
+// never shipped Android support for reading this folder at all, manifest or not, without it.
 //
 // Requires a JDK on this machine (for `java`/`keytool` - see https://adoptium.net if you don't
 // have one). Does NOT require the Android SDK - apksigner.jar (bundled alongside this tool) is
 // the only Android-specific piece needed, and it runs under a plain JDK.
 //
-// Usage: ApkPatcher <path-to-game.apk> [--replace-data <path-to-data.win>] [--include-mods <path>] [--hmv | --touch-controls] [--out <output.apk>] [--yes]
+// Usage: ApkPatcher <path-to-game.apk> [--replace-data <path-to-data.win>] [--include-mods <path>] [--hmv | --touch-controls | --custom-alts | --android-custom-discovery] [--out <output.apk>] [--yes]
 //
 // --hmv and --touch-controls each apply a DIFFERENT patch instead of the default toy telemetry
 // one - they're mutually exclusive with each other and with the default in a single run. To
@@ -48,6 +52,7 @@ bool skipConfirm = false;
 bool hmvMode = false;
 bool touchControlsMode = false;
 bool customAltsMode = false;
+bool androidCustomDiscoveryMode = false;
 
 foreach (string arg in args)
 {
@@ -56,6 +61,7 @@ foreach (string arg in args)
     else if (arg == "--hmv") hmvMode = true;
     else if (arg == "--touch-controls") touchControlsMode = true;
     else if (arg == "--custom-alts") customAltsMode = true;
+    else if (arg == "--android-custom-discovery") androidCustomDiscoveryMode = true;
     else if (arg == "--out") { /* consumed below */ }
     else if (arg == "--replace-data") { /* consumed below */ }
     else if (arg == "--include-mods") { /* consumed below */ }
@@ -80,7 +86,14 @@ if (includeModsPath is not null && !Directory.Exists(includeModsPath))
     return 1;
 }
 
-string[] modFolderNames = ["custom_wives", "custom_futas", "custom_bedrooms", "dialogue_packs", "texture_packs"];
+// "custom" is vanilla's OWN flat character-folder layout (one subfolder per character/bedroom,
+// same shape as custom_wives/custom_futas but a single folder rather than split by type) - added
+// 2026-07-29 after discovering this was silently never bundled at all (a real, previously-unnoticed
+// gap: this array used to only cover ModRoom-style layouts). Requires the game's own data.win to
+// also have GamePatcher's --android-custom-discovery patch applied for these to actually be found
+// on Android - see GamePatcher.cs's ANDROID CUSTOM CHARACTER DISCOVERY section for why (vanilla's
+// own discovery code never runs on mobile at all, manifest or not, without that patch).
+string[] modFolderNames = ["custom_wives", "custom_futas", "custom_bedrooms", "dialogue_packs", "texture_packs", "custom"];
 
 if (apkPath is null)
 {
@@ -149,6 +162,7 @@ try
     var status = hmvMode ? GamePatcher.CheckHmvStatus(tempDataFile)
         : touchControlsMode ? GamePatcher.CheckTouchControlsStatus(tempDataFile)
         : customAltsMode ? GamePatcher.CheckCustomAltsStatus(tempDataFile)
+        : androidCustomDiscoveryMode ? GamePatcher.CheckAndroidCustomDiscoveryStatus(tempDataFile)
         : GamePatcher.CheckStatus(tempDataFile);
     Console.WriteLine($"Compatible: {status.Compatible}   Already patched: {status.AlreadyPatched}   ({status.Detail})");
     if (!status.Compatible)
@@ -160,7 +174,7 @@ try
     {
         if (!skipConfirm)
         {
-            string what = hmvMode ? "HMV mode" : touchControlsMode ? "touch controls" : customAltsMode ? "custom alts" : "toy telemetry";
+            string what = hmvMode ? "HMV mode" : touchControlsMode ? "touch controls" : customAltsMode ? "custom alts" : androidCustomDiscoveryMode ? "Android custom discovery" : "toy telemetry";
             string action = replaceDataPath is not null
                 ? $"This will build a new APK using the data file you gave it, with {what} added, re-signed, saved at:\n  {outPath}"
                 : $"This will create a patched ({what}), re-signed copy at:\n  {outPath}";
@@ -176,6 +190,7 @@ try
         var outcome = hmvMode ? GamePatcher.PatchHmv(tempDataFile)
             : touchControlsMode ? GamePatcher.PatchTouchControls(tempDataFile)
             : customAltsMode ? GamePatcher.PatchCustomAlts(tempDataFile)
+            : androidCustomDiscoveryMode ? GamePatcher.PatchAndroidCustomDiscovery(tempDataFile)
             : GamePatcher.Patch(tempDataFile);
         Console.WriteLine($"{outcome.Result}: {outcome.Message}");
         if (outcome.Result != GamePatcher.PatchResult.Patched)
@@ -222,7 +237,7 @@ try
             // why custom characters never showed as available there), only opening a file by an
             // already-known name does. --touch-controls patches the game to read this manifest
             // instead of enumerating, when present - see GamePatcher.cs.
-            string[] manifestFolderNames = ["custom_wives", "custom_futas", "texture_packs"];
+            string[] manifestFolderNames = ["custom_wives", "custom_futas", "texture_packs", "custom"];
             static string NormalizeAssetPath(string s) => s.ToLowerInvariant().Replace(' ', '_');
 
             int filesAdded = 0;
@@ -339,7 +354,7 @@ finally
 
 static void PrintUsage()
 {
-    Console.WriteLine("Usage: ApkPatcher <path-to-game.apk> [--replace-data <path-to-data.win>] [--include-mods <path>] [--hmv | --touch-controls | --custom-alts] [--out <output.apk>] [--yes]");
+    Console.WriteLine("Usage: ApkPatcher <path-to-game.apk> [--replace-data <path-to-data.win>] [--include-mods <path>] [--hmv | --touch-controls | --custom-alts | --android-custom-discovery] [--out <output.apk>] [--yes]");
     Console.WriteLine();
     Console.WriteLine("Patches the Android build of a compatible game (Wife's Bedroom / ModRoom / compatible");
     Console.WriteLine("mods) to add Buttplug.io toy telemetry, and produces a new, re-signed APK next to the");
@@ -356,11 +371,14 @@ static void PrintUsage()
     Console.WriteLine("--include-mods <path>");
     Console.WriteLine("    Bundle a mod's external content folders into the APK too - point this at whatever");
     Console.WriteLine("    folder directly contains custom_wives/custom_futas/custom_bedrooms/dialogue_packs/");
-    Console.WriteLine("    texture_packs (e.g. your ModRoom install folder). Required for those to work at all");
-    Console.WriteLine("    on Android - unlike PC, there's no writable folder next to the game these can be");
-    Console.WriteLine("    dropped into later, so they have to be packaged in up front. Whichever of the five");
-    Console.WriteLine("    folders exist are copied in; nothing about your specific mods is bundled with this");
-    Console.WriteLine("    tool itself - you supply your own each time you run it.");
+    Console.WriteLine("    texture_packs/custom (e.g. your ModRoom install folder, or a vanilla install's own");
+    Console.WriteLine("    folder for its \"custom\" subfolder). Required for those to work at all on Android -");
+    Console.WriteLine("    unlike PC, there's no writable folder next to the game these can be dropped into");
+    Console.WriteLine("    later, so they have to be packaged in up front. Whichever of the six folders exist");
+    Console.WriteLine("    are copied in; nothing about your specific mods is bundled with this tool itself -");
+    Console.WriteLine("    you supply your own each time you run it. For vanilla's \"custom\" folder, the");
+    Console.WriteLine("    target data.win also needs GamePatcher's --android-custom-discovery patch applied");
+    Console.WriteLine("    for these to actually be found on Android.");
     Console.WriteLine();
     Console.WriteLine("--hmv");
     Console.WriteLine("    Apply the HMV mode patch (lets an external tool drive thrust rhythm and background");
@@ -380,6 +398,13 @@ static void PrintUsage()
     Console.WriteLine("    etc, right-click the portrait-swap button to cycle) and click-scroll arrows for the");
     Console.WriteLine("    custom character list. Specific to this vanilla install's own func_load_custom -");
     Console.WriteLine("    not ModRoom-style builds.");
+    Console.WriteLine();
+    Console.WriteLine("--android-custom-discovery");
+    Console.WriteLine("    Apply the Android custom-character-discovery patch instead of the toy telemetry");
+    Console.WriteLine("    patch - vanilla's own discovery code never runs on mobile at all, so bundled");
+    Console.WriteLine("    characters (via --include-mods) were never found there even when correctly");
+    Console.WriteLine("    bundled. Makes them discoverable via a manifest. Independent of --custom-alts -");
+    Console.WriteLine("    apply both if wanted, same --replace-data chaining as combining any other patches.");
 }
 
 static ZipArchiveEntry? FindGameDataEntry(ZipArchive archive)

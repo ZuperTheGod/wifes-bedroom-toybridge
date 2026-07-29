@@ -1868,6 +1868,86 @@ Investigated methodically rather than guessing:
     actual on-screen behavior of the two new features is still unverified and needs a real
     playtest, flagged honestly rather than assumed.
 
+  2026-07-28 (same day, later still): ANDROID CUSTOM CHARACTERS - BUNDLING FIX +
+  DISCOVERY PATCH, WITH THREE REAL BUGS FOUND AND FIXED VIA REAL DEVICE-STYLE
+  VERIFICATION (not assumed at any step)
+  - User reported that a fresh Android build with custom characters bundled still
+    "looks like the plain 1.4 version without any customs like my last run" - i.e. even
+    after the earlier crash fix, custom characters still didn't appear on Android at all.
+  - Root cause #1 (bundling): ApkPatcher --include-mods's modFolderNames/manifestFolderNames
+    arrays only ever recognized ModRoom-style folder names (custom_wives/custom_futas/
+    custom_bedrooms/dialogue_packs/texture_packs) - vanilla's own flat custom/<name>/ layout
+    was never in the list, so it silently bundled zero characters for any vanilla-based
+    Android build ever attempted. Fixed by adding "custom" to both arrays.
+  - Root cause #2 (vanilla's own Android gap): even with bundling fixed, decompiling
+    oFutaMatingPress_Create_0 showed vanilla's own PC-only discovery loop (file_find_first-
+    based folder enumeration) - Android's asset-bundled files can't be enumerated this way
+    (confirmed earlier this session investigating ModRoom's touch controls), so vanilla
+    never had ANY working way to discover custom characters on Android, even unmodified.
+    Added a new --android-custom-discovery patch: reads a manifest file (already written by
+    the bundling fix above) instead of enumerating, reusing the exact same per-folder
+    func_load_custom + switch(custom_load_type) logic the PC branch already uses.
+  - First attempt shipped with a wrong gating condition (`else if (mobile == true)`) and
+    genuinely looked complete: compiled cleanly, composed with the other patches, built an
+    APK successfully. Did NOT stop there - tested on the emulator per the project's standing
+    "verify, don't assume" rule, and it silently did nothing (no crash, but also no customs,
+    and zero debug output anywhere).
+  - Investigated for real rather than guessing: show_debug_message calls were confirmed (via
+    a throwaway diagnostic patch placed at the very top of Create_0, rebuilt and tested) to
+    never reach Android logcat AT ALL on this build/runtime, so logcat-based debugging was a
+    dead end for this investigation specifically. Switched to an on-screen draw_text HUD
+    instead (visible in screenshots), which is what actually exposed everything below.
+  - Root cause #3, found via --find-code (a new read-only diagnostic added this session -
+    decompiles every top-level code entry and reports which ones contain a given substring):
+    grepping the WHOLE data file for "mobile =" showed it is hardcoded `mobile = false;` at
+    the top of Create_0 and is NEVER reassigned anywhere else in the entire game, on any
+    platform. Two consequences, both missed in the first attempt: (a) `mobile == true` can
+    never be true, so that branch was dead code from the moment it was written; (b) more
+    importantly, BECAUSE `mobile == false` is unconditionally true, the EXISTING PC-only `if`
+    block always wins - an `else if` attached to it can never run no matter what condition it
+    checks, since only the first true branch of an if/else-if chain ever executes. Fixed by
+    using a real platform check (`os_type == os_android || os_type == os_ios`) AND making it
+    a standalone `if`, not an `else if`, so it runs independently of the PC branch's outcome.
+  - Even after that fix, an on-screen HUD (draw_text, since show_debug_message doesn't reach
+    logcat here) showed the manifest-reading loop still executed zero iterations. Root cause:
+    working_directory already includes a trailing slash on Android ("assets/") but not on PC,
+    so appending "/custom/_manifest.txt" unconditionally produced a double-slash path
+    ("assets//custom/...") that file_exists() failed to resolve. Fixed by stripping any
+    trailing slash from working_directory before appending, so the path is correct on both
+    platforms regardless of their differing conventions.
+  - A debug-HUD-instrumented build crashed (silently, no error dialog - same class of bug as
+    the earlier default-parameter crash) between the "else if" fix and the standalone-if fix,
+    because instance variables used only inside the (at-the-time still unreachable) discovery
+    branch were read by the HUD every frame while genuinely undefined. This was itself useful
+    evidence, not just a bug to route around - it's what proved the branch really wasn't
+    running, before the deeper "else if can never run" root cause was identified.
+  - All temporary diagnostic scaffolding (the debug-HUD patch, the debug-counter
+    instrumentation) was removed from GamePatcher.cs before shipping - none of it is part of
+    the real patch. The --find-code diagnostic (generically useful, not throwaway) was kept
+    permanently alongside --dump-code/--dump-version/etc.
+  - Verified for real, in this order, before calling it done: (1) PC regression launch with
+    the real 102-folder custom/ directory - zero errors, main loop reached; (2) scratch Android
+    build with full debug instrumentation - on-screen HUD confirmed manifest found, all 102
+    lines read, ds_lists correctly populated (lover=46, partner=47, bedroom=9); (3) opened the
+    in-game "CUSTOM" character browser that appears once custom_sprite_loaded is set (was never
+    reachable before this fix) and selected an actual character - it rendered "Gawr Gura Nude
+    (Futa)" with the pack's own correct credits text ("Commissioned by leahvii", "Created by
+    Jcbuthorn"), a real bundled character, not a placeholder; (4) clean final rebuild with all
+    debug scaffolding removed, re-verified no crash and the same title-screen counter (vanilla's
+    own built-in "CUSTOM ASSETS LOADED - LOVERS = 46 / PARTNERS = 47 / BEDROOMS = 9" debug
+    overlay, which only appears when discovery actually succeeds); (5) applied for real to the
+    live wifes_bedroom_win install, real PC launch there too - clean; (6) rebuilt both exes
+    self-contained and redeployed to all known copies (buttplug-mod root, wifes_bedroom_win
+    root, shareable, installer/stage, ModRoom V3.2's two copies, and a newer
+    discord-package-android copy found this pass); (7) rebuilt the Windows installer.
+  - NOT yet verified: real Android hardware (phone/BlueStacks). The emulator has already
+    proven unreliable for reproducing real-device-specific issues twice this session (the
+    WB-ModRoom .6 GameMaker-version bytecode bug, and the earlier default-parameter crash) -
+    so per the project's standing practice, this is NOT declared fully fixed until the user
+    confirms on their own hardware. A fresh APK (wifes_bedroom-android-v1.4.2.apk, built from
+    the live install with its real, full custom/ folder bundled) was sent directly to the user
+    for that real-device confirmation.
+
 SHARING THIS MOD
 -------------------
 Do NOT share the patched data.win directly - it contains the entire
