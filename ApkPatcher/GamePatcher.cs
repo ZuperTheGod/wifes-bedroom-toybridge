@@ -1479,6 +1479,33 @@ static class GamePatcher
     private const string CustomAltsPartnerCallReplacement =
         "func_load_custom(ds_list_find_value(custom_partner_folders, custom_partner_selected), custom_current_partner_alt);";
 
+    // The 4 remaining func_load_custom(...) call sites in Create_0 (the initial folder-scan/type-
+    // detection loop, and the three menu-thumbnail pre-load loops for lovers/partners/bedrooms) -
+    // NOT modified above, so left calling with only one argument, relying on arg1's new default
+    // value (-1). Confirmed by real-device testing (not assumed): the SAME data.win reached the
+    // main loop cleanly on an Android emulator but instantly force-closed (silently, no GML error
+    // dialog - i.e. a native-level crash, not a caught script error) on a real phone. The default-
+    // parameter mechanism itself is the prime suspect (an unusual-enough GML construct that our
+    // recompiled bytecode might encode in a way real hardware's runtime handles differently than
+    // the emulator's, similar in spirit to the earlier WB-ModRoom .6 GameMaker-version bytecode
+    // incompatibility, though NOT the same specific bug). Rather than fully proving the exact
+    // mechanism, the safe fix is defensive: make every call site pass exactly 2 arguments, so the
+    // default-value code path is never exercised at all, regardless of which theory is right.
+    private const string CustomAltsScanCallMarker = "func_load_custom(_file);";
+    private const string CustomAltsScanCallReplacement = "func_load_custom(_file, -1);";
+    private const string CustomAltsPreloadLoverCallMarker =
+        "func_load_custom(ds_list_find_value(custom_lover_folders, i));";
+    private const string CustomAltsPreloadLoverCallReplacement =
+        "func_load_custom(ds_list_find_value(custom_lover_folders, i), -1);";
+    private const string CustomAltsPreloadPartnerCallMarker =
+        "func_load_custom(ds_list_find_value(custom_partner_folders, i));";
+    private const string CustomAltsPreloadPartnerCallReplacement =
+        "func_load_custom(ds_list_find_value(custom_partner_folders, i), -1);";
+    private const string CustomAltsPreloadBedroomCallMarker =
+        "func_load_custom(ds_list_find_value(custom_bedroom_folders, i));";
+    private const string CustomAltsPreloadBedroomCallReplacement =
+        "func_load_custom(ds_list_find_value(custom_bedroom_folders, i), -1);";
+
     private const string CustomAltsLoverSelectMarker =
         "                        custom_lover_selected = i - 1;\n" +
         "                        func_set_custom_lover();";
@@ -1595,6 +1622,13 @@ static class GamePatcher
                     "version may not be compatible (this patch is specific to this vanilla install's own " +
                     "func_load_custom, not ModRoom-style check_custom_futa builds).");
             }
+            if (!createText.Contains(CustomAltsScanCallMarker) || !createText.Contains(CustomAltsPreloadLoverCallMarker) ||
+                !createText.Contains(CustomAltsPreloadPartnerCallMarker) || !createText.Contains(CustomAltsPreloadBedroomCallMarker))
+            {
+                return (false, false,
+                    "Found func_load_custom but not all its expected call sites in the Create event - this " +
+                    "game's version may not be compatible.");
+            }
             string drawText = new DecompileContext(globalContext, drawCode, settings).DecompileToString();
             if (!drawText.Contains(CustomAltsCycleMarker) || !drawText.Contains(ClickScrollMarker) ||
                 !drawText.Contains(CustomAltsLoverSelectMarker) || !drawText.Contains(CustomAltsPartnerSelectMarker))
@@ -1650,7 +1684,9 @@ static class GamePatcher
                     "version may not be compatible.");
             }
             if (!createText.Contains(CustomAltsGlobalsMarker) || !createText.Contains(CustomAltsLoverCallMarker) ||
-                !createText.Contains(CustomAltsPartnerCallMarker))
+                !createText.Contains(CustomAltsPartnerCallMarker) || !createText.Contains(CustomAltsScanCallMarker) ||
+                !createText.Contains(CustomAltsPreloadLoverCallMarker) || !createText.Contains(CustomAltsPreloadPartnerCallMarker) ||
+                !createText.Contains(CustomAltsPreloadBedroomCallMarker))
             {
                 return new PatchOutcome(PatchResult.NotSupported,
                     "Found func_load_custom but not all the other expected markers in the Create event - " +
@@ -1674,6 +1710,10 @@ static class GamePatcher
             createText = createText.Replace(CustomAltsGlobalsMarker, CustomAltsGlobalsReplacement);
             createText = createText.Replace(CustomAltsLoverCallMarker, CustomAltsLoverCallReplacement);
             createText = createText.Replace(CustomAltsPartnerCallMarker, CustomAltsPartnerCallReplacement);
+            createText = createText.Replace(CustomAltsScanCallMarker, CustomAltsScanCallReplacement);
+            createText = createText.Replace(CustomAltsPreloadLoverCallMarker, CustomAltsPreloadLoverCallReplacement);
+            createText = createText.Replace(CustomAltsPreloadPartnerCallMarker, CustomAltsPreloadPartnerCallReplacement);
+            createText = createText.Replace(CustomAltsPreloadBedroomCallMarker, CustomAltsPreloadBedroomCallReplacement);
 
             drawText = drawText.Replace(CustomAltsCycleMarker, CustomAltsCycleReplacement);
             drawText = drawText.Replace(ClickScrollMarker, ClickScrollReplacement);

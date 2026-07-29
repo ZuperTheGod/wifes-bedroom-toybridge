@@ -1820,6 +1820,54 @@ composed cleanly), confirmed AlreadyPatched afterward, real launch on the actual
 boot, zero errors, same as the scratch test. Rebuilt/redeployed GamePatcher.exe/ApkPatcher.exe to
 all locations and the installer.
 
+CUSTOM ALTS - REAL ANDROID CRASH FOUND AND FIXED (2026-07-28, same day, later still): user tried
+building an Android APK with the newly-patched data.win via the Launcher's Android tab and hit an
+instant, silent force-close on their real phone (no GML error dialog at all - unlike every other
+crash investigated this session, meaning a native-level failure, not a caught script error).
+Investigated methodically rather than guessing:
+  - Rebuilt the EXACT SAME APK configuration and tested it on the Android emulator - it launched
+    cleanly, "Entering main loop.", no crash. Real device and emulator disagreeing on the identical
+    APK was itself an important data point.
+  - Along the way, found a real, separate bug in ApkPatcher: --include-mods only recognizes
+    ModRoom-style folder names (custom_wives/custom_futas/etc.) - it silently reports "nothing to
+    bundle" for vanilla's own flat custom/<name>/ layout and bundles ZERO characters. (Not yet
+    fixed - noted for a future round; ApkPatcher needs a vanilla-layout bundling path too.)
+  - Built a genuine A/B test for the user to run on their own phone: a "control" APK with ONLY the
+    pre-existing base telemetry patch (no custom-alts) - confirmed to run FINE on their phone. This
+    conclusively isolated the crash to the custom-alts patch specifically, not a device/toolchain
+    issue in general (matters, since something else HAD worked on this exact phone before).
+  - Re-examined the patch's own func_load_custom(...) call sites and found the real gap: the new
+    signature (func_load_custom(arg0, arg1 = -1)) was only updated at the 2 call sites the feature
+    itself needed (inside func_set_custom_lover/func_set_custom_partner) - FOUR other pre-existing
+    call sites (the initial folder-scan/type-detection loop, and three menu-thumbnail preload loops
+    for lovers/partners/bedrooms) were left calling with only ONE argument, relying on the new
+    default parameter value. Confirmed via grep that these 4 call sites are real and were genuinely
+    missed the first time (not assumed - counted occurrences of "func_load_custom(" before and
+    after the original patch).
+  - Root cause not fully proven (no direct crash log from the real device was available), but the
+    fix is defensive and doesn't need full certainty: updated all 4 remaining call sites to pass
+    the alt argument explicitly (-1, matching what the default would have provided) rather than
+    omitting it, so the default-parameter code path in the recompiled bytecode is never exercised
+    at all, regardless of exactly why it was unreliable. Same category of lesson as the earlier
+    GameMaker-version bytecode incompatibility with WB-ModRoom .6 - an unusual-enough GML construct
+    (default parameter values here, "impossible" struct field names there) compiling into something
+    a real device's runtime doesn't handle the same way an emulator or PC does.
+  - Restored the live install from its pristine .bak and re-applied both patches fresh with the
+    fix, real PC launch confirmed clean. Built a new Android APK and sent it to the user directly
+    (SendUserFile, not just a repo path) for a REAL test on their actual phone AND BlueStacks (a
+    second, independent real-device-class environment) - user confirmed: "it looks like the plain
+    1.4 base" on both. Fix confirmed working for real, not assumed from the defensive reasoning
+    alone. Rebuilt/redeployed exes and the installer with the confirmed fix.
+  - Also worth recording: mid-investigation, attempted a live interactive UI check via a Windows
+    desktop-automation tool to visually confirm the right-click alt-cycle and click-scroll arrows -
+    aborted immediately when the screenshot captured the user's full desktop including what looked
+    like a private Discord conversation, unrelated to this task; did not read or act on that
+    content, and did not retry via that method. The interactive visual/click confirmation (does
+    right-click actually show the alt look, do the arrows render without overlapping other UI)
+    still has NOT been done - the crash is fixed and the game now runs on real Android, but the
+    actual on-screen behavior of the two new features is still unverified and needs a real
+    playtest, flagged honestly rather than assumed.
+
 SHARING THIS MOD
 -------------------
 Do NOT share the patched data.win directly - it contains the entire
