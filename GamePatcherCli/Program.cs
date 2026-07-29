@@ -53,6 +53,20 @@ if (args.Length < 1 || args[0] is "-h" or "--help")
     Console.WriteLine("                      read-only diagnostic: decompiles one code entry (e.g.");
     Console.WriteLine("                      gml_Object_oFutaMatingPress_Create_0) and writes its GML to a");
     Console.WriteLine("                      file - useful for investigating a patch failure's real cause.");
+    Console.WriteLine("  --dump-version      read-only diagnostic: reports the GameMaker version this data");
+    Console.WriteLine("                      file was compiled with - useful for spotting a version mismatch");
+    Console.WriteLine("                      when swapping a data file into a different game's shell/APK.");
+    Console.WriteLine("  --touch-code <event-name>[,<event-name>...]");
+    Console.WriteLine("                      re-encodes one or more code entries through our own compiler with");
+    Console.WriteLine("                      no intentional behavior change - can resolve a GameMaker-version-");
+    Console.WriteLine("                      mismatch crash on code we'd otherwise never touch. Always re-test");
+    Console.WriteLine("                      after using this; it is not guaranteed to fix anything.");
+    Console.WriteLine("  --custom-alts       apply the custom-character-alts + click-scroll patch instead of");
+    Console.WriteLine("                      the toy telemetry patch - adds numbered alt looks for custom");
+    Console.WriteLine("                      characters (custom_data_1.futa/.spouse etc, right-click the");
+    Console.WriteLine("                      portrait-swap button to cycle) and click-scroll arrows for the");
+    Console.WriteLine("                      custom character list. Specific to this vanilla install's own");
+    Console.WriteLine("                      func_load_custom - not ModRoom-style builds.");
     return args.Length < 1 ? 1 : 0;
 }
 
@@ -61,8 +75,12 @@ bool checkOnly = args.Contains("--check");
 bool skipConfirm = args.Contains("--yes");
 bool hmvMode = args.Contains("--hmv");
 bool touchControlsMode = args.Contains("--touch-controls");
+bool customAltsMode = args.Contains("--custom-alts");
 bool checkModSystem = args.Contains("--check-mod-system");
+bool dumpVersion = args.Contains("--dump-version");
 int dumpCodeIdx = Array.IndexOf(args, "--dump-code");
+int touchCodeIdx = Array.IndexOf(args, "--touch-code");
+bool touchAllCode = args.Contains("--touch-all-code");
 
 if (!File.Exists(inputPath))
 {
@@ -80,6 +98,12 @@ if (dataPath is null)
 
 Console.WriteLine($"Game data file: {dataPath}");
 
+if (dumpVersion)
+{
+    Console.WriteLine(GamePatcher.DumpVersionInfo(dataPath));
+    return 0;
+}
+
 if (dumpCodeIdx >= 0)
 {
     if (dumpCodeIdx + 2 >= args.Length)
@@ -88,6 +112,32 @@ if (dumpCodeIdx >= 0)
         return 1;
     }
     Console.WriteLine(GamePatcher.DumpCode(dataPath, args[dumpCodeIdx + 1], args[dumpCodeIdx + 2]));
+    return 0;
+}
+
+if (touchCodeIdx >= 0)
+{
+    if (touchCodeIdx + 1 >= args.Length)
+    {
+        Console.WriteLine("Usage: GamePatcher <path> --touch-code <event-name>[,<event-name>...]");
+        return 1;
+    }
+    string[] eventNames = args[touchCodeIdx + 1].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    Console.WriteLine(GamePatcher.TouchCode(dataPath, eventNames));
+    return 0;
+}
+
+int dumpPropsIdx = Array.IndexOf(args, "--dump-code-properties");
+if (dumpPropsIdx >= 0)
+{
+    Console.WriteLine(GamePatcher.DumpCodeEntryProperties(dataPath, args[dumpPropsIdx + 1]));
+    return 0;
+}
+
+if (touchAllCode)
+{
+    Console.WriteLine("This can take a while for a large data file (decompiling+recompiling every code entry)...");
+    Console.WriteLine(GamePatcher.TouchAllCode(dataPath));
     return 0;
 }
 
@@ -100,6 +150,7 @@ if (checkModSystem)
 
 var status = hmvMode ? GamePatcher.CheckHmvStatus(dataPath)
     : touchControlsMode ? GamePatcher.CheckTouchControlsStatus(dataPath)
+    : customAltsMode ? GamePatcher.CheckCustomAltsStatus(dataPath)
     : GamePatcher.CheckStatus(dataPath);
 Console.WriteLine($"Compatible: {status.Compatible}   Already patched: {status.AlreadyPatched}   ({status.Detail})");
 
@@ -133,6 +184,7 @@ if (!skipConfirm)
 
 var outcome = hmvMode ? GamePatcher.PatchHmv(dataPath)
     : touchControlsMode ? GamePatcher.PatchTouchControls(dataPath)
+    : customAltsMode ? GamePatcher.PatchCustomAlts(dataPath)
     : GamePatcher.Patch(dataPath);
 Console.WriteLine($"{outcome.Result}: {outcome.Message}");
 return outcome.Result is GamePatcher.PatchResult.Patched or GamePatcher.PatchResult.AlreadyPatched ? 0 : 1;

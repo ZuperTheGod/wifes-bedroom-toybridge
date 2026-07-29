@@ -47,6 +47,7 @@ string? includeModsPath = null;
 bool skipConfirm = false;
 bool hmvMode = false;
 bool touchControlsMode = false;
+bool customAltsMode = false;
 
 foreach (string arg in args)
 {
@@ -54,6 +55,7 @@ foreach (string arg in args)
     else if (arg == "--yes") skipConfirm = true;
     else if (arg == "--hmv") hmvMode = true;
     else if (arg == "--touch-controls") touchControlsMode = true;
+    else if (arg == "--custom-alts") customAltsMode = true;
     else if (arg == "--out") { /* consumed below */ }
     else if (arg == "--replace-data") { /* consumed below */ }
     else if (arg == "--include-mods") { /* consumed below */ }
@@ -146,6 +148,7 @@ try
 
     var status = hmvMode ? GamePatcher.CheckHmvStatus(tempDataFile)
         : touchControlsMode ? GamePatcher.CheckTouchControlsStatus(tempDataFile)
+        : customAltsMode ? GamePatcher.CheckCustomAltsStatus(tempDataFile)
         : GamePatcher.CheckStatus(tempDataFile);
     Console.WriteLine($"Compatible: {status.Compatible}   Already patched: {status.AlreadyPatched}   ({status.Detail})");
     if (!status.Compatible)
@@ -157,7 +160,7 @@ try
     {
         if (!skipConfirm)
         {
-            string what = hmvMode ? "HMV mode" : touchControlsMode ? "touch controls" : "toy telemetry";
+            string what = hmvMode ? "HMV mode" : touchControlsMode ? "touch controls" : customAltsMode ? "custom alts" : "toy telemetry";
             string action = replaceDataPath is not null
                 ? $"This will build a new APK using the data file you gave it, with {what} added, re-signed, saved at:\n  {outPath}"
                 : $"This will create a patched ({what}), re-signed copy at:\n  {outPath}";
@@ -172,6 +175,7 @@ try
 
         var outcome = hmvMode ? GamePatcher.PatchHmv(tempDataFile)
             : touchControlsMode ? GamePatcher.PatchTouchControls(tempDataFile)
+            : customAltsMode ? GamePatcher.PatchCustomAlts(tempDataFile)
             : GamePatcher.Patch(tempDataFile);
         Console.WriteLine($"{outcome.Result}: {outcome.Message}");
         if (outcome.Result != GamePatcher.PatchResult.Patched)
@@ -335,7 +339,7 @@ finally
 
 static void PrintUsage()
 {
-    Console.WriteLine("Usage: ApkPatcher <path-to-game.apk> [--replace-data <path-to-data.win>] [--include-mods <path>] [--hmv | --touch-controls] [--out <output.apk>] [--yes]");
+    Console.WriteLine("Usage: ApkPatcher <path-to-game.apk> [--replace-data <path-to-data.win>] [--include-mods <path>] [--hmv | --touch-controls | --custom-alts] [--out <output.apk>] [--yes]");
     Console.WriteLine();
     Console.WriteLine("Patches the Android build of a compatible game (Wife's Bedroom / ModRoom / compatible");
     Console.WriteLine("mods) to add Buttplug.io toy telemetry, and produces a new, re-signed APK next to the");
@@ -369,6 +373,13 @@ static void PrintUsage()
     Console.WriteLine("    mods (confirmed in ModRoom) whose settings only work with a mouse. To combine with");
     Console.WriteLine("    toy telemetry or another patch, run this tool once per patch, feeding each output");
     Console.WriteLine("    back in as the next run's --replace-data.");
+    Console.WriteLine();
+    Console.WriteLine("--custom-alts");
+    Console.WriteLine("    Apply the custom-character-alts + click-scroll patch instead of the toy telemetry");
+    Console.WriteLine("    patch - adds numbered alt looks for custom characters (custom_data_1.futa/.spouse");
+    Console.WriteLine("    etc, right-click the portrait-swap button to cycle) and click-scroll arrows for the");
+    Console.WriteLine("    custom character list. Specific to this vanilla install's own func_load_custom -");
+    Console.WriteLine("    not ModRoom-style builds.");
 }
 
 static ZipArchiveEntry? FindGameDataEntry(ZipArchive archive)

@@ -91,6 +91,56 @@ static class GamePatcher
         }
     }
 
+    /// <summary>Diagnostic only, never modifies the data file: reports the GameMaker bytecode/
+    /// runtime version this specific data file was compiled with (data.GeneralInfo), plus whether
+    /// it's flagged for YYC (native-compiled code) vs VM bytecode. Two data files with different
+    /// values here were built by different GameMaker Studio versions/export targets - swapping one
+    /// into an APK shell built for the other can produce exactly this kind of runtime struct-
+    /// construction crash, since struct/hash bytecode encoding isn't guaranteed stable across
+    /// GameMaker versions.</summary>
+    public static string DumpVersionInfo(string dataWinPath)
+    {
+        try
+        {
+            UndertaleData data;
+            using (var stream = new FileStream(dataWinPath, FileMode.Open, FileAccess.Read))
+            {
+                data = UndertaleIO.Read(stream);
+            }
+
+            var info = data.GeneralInfo;
+            var lines = new List<string>
+            {
+                $"BytecodeVersion: {data.GeneralInfo?.BytecodeVersion}",
+                $"Info.Major/Minor/Release/Build: {info?.Major}.{info?.Minor}.{info?.Release}.{info?.Build}",
+                $"GMS2 version fields if present:",
+            };
+            if (info is not null)
+            {
+                foreach (var prop in info.GetType().GetProperties())
+                {
+                    try
+                    {
+                        var val = prop.GetValue(info);
+                        if (val is not null && (prop.Name.Contains("Version", StringComparison.OrdinalIgnoreCase)
+                                                 || prop.Name.Contains("YYC", StringComparison.OrdinalIgnoreCase)
+                                                 || prop.Name.Contains("Debug", StringComparison.OrdinalIgnoreCase)))
+                        {
+                            lines.Add($"  {prop.Name} = {val}");
+                        }
+                    }
+                    catch { /* some properties throw on access for unrelated reasons - skip */ }
+                }
+            }
+            lines.Add($"Data.UnsupportedBytecodeVersion: {data.UnsupportedBytecodeVersion}");
+            return string.Join("\n", lines);
+        }
+        catch (Exception ex)
+        {
+            return $"Error: {ex.Message}";
+        }
+    }
+
     /// <summary>Diagnostic only, never modifies the data file: decompiles one named code entry
     /// (e.g. "gml_Object_oFutaMatingPress_Create_0") and writes the full GML text Underanalyzer
     /// produced to outputPath - for investigating decompile/recompile round-trip failures
@@ -117,6 +167,199 @@ static class GamePatcher
             string text = new DecompileContext(globalContext, code, settings).DecompileToString();
             File.WriteAllText(outputPath, text);
             return $"Wrote {text.Length} chars ({text.Split('\n').Length} lines) to {outputPath}";
+        }
+        catch (Exception ex)
+        {
+            return $"Error: {ex.Message}";
+        }
+    }
+
+    /// <summary>Diagnostic/repair tool: decompiles one or more named code entries and re-imports
+    /// the EXACT same GML text through our own compiler with no intentional semantic changes -
+    /// re-encodes them using OUR toolchain's bytecode generation instead of whatever GameMaker
+    /// Studio version originally compiled them. Real motivation: swapping a data file across
+    /// GameMaker point releases (e.g. into an Android APK shell built for a different version)
+    /// can crash on otherwise-ordinary code due to version-dependent struct/hash encoding
+    /// differences (confirmed - WB-ModRoom "Release 1" was compiled with GameMaker 2024.14,
+    /// crashed only when its data.win was swapped into an Android shell built for 2024.13's
+    /// runtime, on code we'd never touched at all) - passing the affected code through our own
+    /// compiler once may normalize it to something the target runtime accepts. This does NOT
+    /// guarantee a fix (our compiler could reproduce the same incompatibility, or a different
+    /// one) - always re-verify with a real launch after using this, never assume success.
+    /// Backs up the original first, same as every other patch in this file.</summary>
+    public static string TouchCode(string dataWinPath, string[] eventNames)
+    {
+        try
+        {
+            string backupPath = dataWinPath + ".bak";
+            if (!File.Exists(backupPath))
+            {
+                File.Copy(dataWinPath, backupPath);
+            }
+
+            UndertaleData data;
+            using (var stream = new FileStream(dataWinPath, FileMode.Open, FileAccess.Read))
+            {
+                data = UndertaleIO.Read(stream);
+            }
+
+            var globalContext = new GlobalDecompileContext(data);
+            var settings = data.ToolInfo.DecompilerSettings;
+            var importGroup = new CodeImportGroup(data) { AutoCreateAssets = false };
+            var touched = new List<string>();
+            var missing = new List<string>();
+
+            foreach (var eventName in eventNames)
+            {
+                var code = data.Code.FirstOrDefault(c => c is not null && c.Name?.Content == eventName);
+                if (code is null)
+                {
+                    missing.Add(eventName);
+                    continue;
+                }
+                string text = new DecompileContext(globalContext, code, settings).DecompileToString();
+                importGroup.QueueReplace(eventName, text);
+                touched.Add(eventName);
+            }
+
+            if (touched.Count == 0)
+            {
+                return $"Nothing touched - none of the requested code entries were found: {string.Join(", ", missing)}";
+            }
+
+            importGroup.Import();
+
+            using (var outStream = new FileStream(dataWinPath, FileMode.Create, FileAccess.Write))
+            {
+                UndertaleIO.Write(outStream, data);
+            }
+
+            string result = $"Re-encoded {touched.Count} code entr{(touched.Count == 1 ? "y" : "ies")} through our own compiler: {string.Join(", ", touched)}. Backup: {backupPath}";
+            if (missing.Count > 0) result += $"\nNot found (skipped): {string.Join(", ", missing)}.";
+            return result;
+        }
+        catch (Exception ex)
+        {
+            return $"Error: {ex.Message}";
+        }
+    }
+
+    /// <summary>Diagnostic only: reflects over every public property of one UndertaleCode entry
+    /// and prints its value - used to find the real parent/child signal (ParentEntry) rather than
+    /// guessing from naming conventions.</summary>
+    public static string DumpCodeEntryProperties(string dataWinPath, string eventName)
+    {
+        try
+        {
+            UndertaleData data;
+            using (var stream = new FileStream(dataWinPath, FileMode.Open, FileAccess.Read))
+            {
+                data = UndertaleIO.Read(stream);
+            }
+            var code = data.Code.FirstOrDefault(c => c is not null && c.Name?.Content == eventName);
+            if (code is null) return $"Not found: {eventName}";
+            var lines = new List<string>();
+            foreach (var prop in code.GetType().GetProperties())
+            {
+                try
+                {
+                    var val = prop.GetValue(code);
+                    lines.Add($"{prop.Name} = {val}");
+                }
+                catch (Exception ex) { lines.Add($"{prop.Name} = <error: {ex.Message}>"); }
+            }
+            return string.Join("\n", lines);
+        }
+        catch (Exception ex)
+        {
+            return $"Error: {ex.Message}";
+        }
+    }
+
+    /// <summary>Same idea as TouchCode, but for every top-level code entry in the file at once -
+    /// an escalation used when touching a single function didn't resolve a version-mismatch
+    /// crash, on the theory that the incompatibility might be in a global table (struct-type/
+    /// function registry) GameMaker's original compiler built consistently across the WHOLE
+    /// project, which a single-function patch can't fix in isolation. Skips auto-generated child
+    /// entries (UndertaleCode.ParentEntry is non-null) - nested/anonymous functions, AND, found
+    /// empirically, some named scripts too (e.g. "gml_Script_scrDebugMenus" whose real root is
+    /// "gml_GlobalScript_scrDebugMenus" - a naming-convention guess like "@parent" in the name
+    /// doesn't cover every case; ParentEntry is the actual authoritative signal) - since those get
+    /// regenerated automatically when their parent is recompiled; trying to decompile one
+    /// independently throws "Expected code entry to be root level" (a nested function's control
+    /// flow can't be analyzed outside its parent's context). Genuinely risky: a decompile or
+    /// recompile failure anywhere aborts the whole operation (nothing is written unless every
+    /// entry succeeds), and even a fully successful recompile is not guaranteed to fix anything -
+    /// always re-verify with a real launch after using this.</summary>
+    public static string TouchAllCode(string dataWinPath)
+    {
+        try
+        {
+            string backupPath = dataWinPath + ".bak";
+            if (!File.Exists(backupPath))
+            {
+                File.Copy(dataWinPath, backupPath);
+            }
+
+            UndertaleData data;
+            using (var stream = new FileStream(dataWinPath, FileMode.Open, FileAccess.Read))
+            {
+                data = UndertaleIO.Read(stream);
+            }
+
+            var globalContext = new GlobalDecompileContext(data);
+            var settings = data.ToolInfo.DecompilerSettings;
+            var importGroup = new CodeImportGroup(data) { AutoCreateAssets = false };
+
+            int totalEntries = data.Code.Count(c => c is not null && c.Name?.Content is not null);
+            var topLevelNames = data.Code
+                .Where(c => c is not null && c.Name?.Content is not null && c.ParentEntry is null)
+                .Select(c => c!.Name!.Content!)
+                .Distinct()
+                .ToList();
+
+            var decompileFailures = new List<(string Name, string Error)>();
+            int queued = 0;
+            foreach (var name in topLevelNames)
+            {
+                var code = data.Code.First(c => c is not null && c.Name?.Content == name);
+                try
+                {
+                    string text = new DecompileContext(globalContext, code, settings).DecompileToString();
+                    importGroup.QueueReplace(name, text);
+                    queued++;
+                }
+                catch (Exception ex)
+                {
+                    decompileFailures.Add((name, ex.Message));
+                }
+            }
+
+            if (decompileFailures.Count > 0)
+            {
+                return $"Aborted before writing anything - {decompileFailures.Count} of {topLevelNames.Count} " +
+                       $"entries failed to even DECOMPILE (not recompile - these can't be re-encoded at all):\n" +
+                       string.Join("\n", decompileFailures.Take(20).Select(f => $"  {f.Name}: {f.Error}"));
+            }
+
+            try
+            {
+                importGroup.Import();
+            }
+            catch (Exception ex)
+            {
+                return $"Aborted before writing anything - recompile failed after successfully decompiling all " +
+                       $"{queued} entries: {ex.Message}";
+            }
+
+            using (var outStream = new FileStream(dataWinPath, FileMode.Create, FileAccess.Write))
+            {
+                UndertaleIO.Write(outStream, data);
+            }
+
+            return $"Re-encoded all {queued} top-level code entries through our own compiler (skipped " +
+                   $"{totalEntries - topLevelNames.Count} auto-generated child entries, regenerated automatically " +
+                   $"as part of their parent). Backup: {backupPath}";
         }
         catch (Exception ex)
         {
@@ -1138,6 +1381,323 @@ static class GamePatcher
         catch (Exception ex)
         {
             return new PatchOutcome(PatchResult.Error, $"Something went wrong while patching touch controls: {ex.Message}");
+        }
+    }
+
+    // ================================================================================
+    // CUSTOM CHARACTER ALTS + CLICK-SCROLL BUTTONS - ported from WB-ModRoom "Release 1" into
+    // vanilla per explicit user request, after WB-ModRoom .6 itself turned out to be permanently
+    // unpatchable for Android (see DECOMPILER UPGRADE history in NOTES.txt - a genuine bug in
+    // that fork's own compiled code that survives even a full whole-file recompile through our
+    // own toolchain, meaning it's a limitation in the Android runtime binaries, not fixable by
+    // any patching tool). WB-ModRoom .6 is built on vanilla's own func_load_custom system
+    // (confirmed by decompiling both, not guessed) - NOT ModRoom V3.2's incompatible separate
+    // check_custom_futa system - which is what makes this port tractable: extending vanilla's
+    // existing function, not bridging two foreign architectures.
+    //
+    // ALTS: a custom character folder can optionally include numbered variant files
+    // (custom_data_1.futa/.spouse, custom_portrait_1.png, etc - WB-ModRoom .6's own exact naming
+    // convention, confirmed by decompiling its func_load_custom) - loaded by RIGHT-clicking the
+    // existing portrait-swap button (reuses that button's hover zone rather than adding new
+    // screen UI - lower risk, no new art needed; left-click there still does its original swap-
+    // portrait job unchanged). Missing alt files fall back to whatever the base (non-alt) load
+    // already set, matching WB-ModRoom .6's own stated fallback behavior. This is a SEPARATE
+    // concept from vanilla's pre-existing single "_alt" sprites (custom_portrait_alt.png etc,
+    // the lover/partner couple-display slot) - those are untouched.
+    //
+    // CLICK-SCROLL: two "<"/">" text buttons flank the custom character portrait row, doing
+    // exactly what mouse-wheel already does to custom_menu_pos (the only existing input for this,
+    // confirmed by decompiling Draw_0) - purely additive alternate input, zero risk to existing
+    // wheel behavior.
+
+    private const string CustomAltsLoadSignatureMarker =
+        "function func_load_custom(arg0)\n" +
+        "{\n" +
+        "    var sprite_origin_x = 80;";
+    private const string CustomAltsLoadSignatureReplacement =
+        "function func_load_custom(arg0, arg1 = -1)\n" +
+        "{\n" +
+        "    var alt_suffix = \"\";\n" +
+        "    if (arg1 > 0)\n" +
+        "    {\n" +
+        "        alt_suffix = \"_\" + string(arg1);\n" +
+        "    }\n" +
+        "    var sprite_origin_x = 80;";
+
+    // One marker/replacement pair per file WB-ModRoom .6 itself applies its alt suffix to
+    // (confirmed by decompiling its func_load_custom - NOT the pre-existing separate "_alt"
+    // sprites). The two custom_data.* markers include the "ini_open(...)" prefix specifically to
+    // stay distinct from the earlier file_exists(...) TYPE-DETECTION check for the same filename
+    // (confirmed by direct count: "custom_data.futa"/"custom_data.spouse" each appear exactly
+    // twice in vanilla's func_load_custom - once in that type check, which must NOT get an alt
+    // suffix, and once in the actual ini_open load, which must) - a bare-literal marker would
+    // have incorrectly matched both. The sprite filename markers are safe as exact lines: each is
+    // confirmed to appear exactly twice (once in the futa case, once identically in the spouse
+    // case - one Replace() correctly covers both) or once (futa-only fields), with no other
+    // occurrence anywhere else in the function.
+    private static readonly (string Marker, string Replacement)[] CustomAltsFileMarkers =
+    {
+        ("ini_open(string(arg0) + \"/custom_data.futa\");",
+         "ini_open(string(arg0) + \"/custom_data\" + alt_suffix + \".futa\");"),
+        ("ini_open(string(arg0) + \"/custom_data.spouse\");",
+         "ini_open(string(arg0) + \"/custom_data\" + alt_suffix + \".spouse\");"),
+        ("var file_check = string(arg0) + \"/custom_portrait.png\";",
+         "var file_check = string(arg0) + \"/custom_portrait\" + alt_suffix + \".png\";"),
+        ("file_check = string(arg0) + \"/custom_mating_press.png\";",
+         "file_check = string(arg0) + \"/custom_mating_press\" + alt_suffix + \".png\";"),
+        ("file_check = string(arg0) + \"/custom_reverse_cowgirl.png\";",
+         "file_check = string(arg0) + \"/custom_reverse_cowgirl\" + alt_suffix + \".png\";"),
+        ("file_check = string(arg0) + \"/custom_deepthroat.png\";",
+         "file_check = string(arg0) + \"/custom_deepthroat\" + alt_suffix + \".png\";"),
+        ("file_check = string(arg0) + \"/custom_condom.png\";",
+         "file_check = string(arg0) + \"/custom_condom\" + alt_suffix + \".png\";"),
+        ("file_check = string(arg0) + \"/custom_condom_broken.png\";",
+         "file_check = string(arg0) + \"/custom_condom_broken\" + alt_suffix + \".png\";"),
+        ("file_check = string(arg0) + \"/custom_xray.png\";",
+         "file_check = string(arg0) + \"/custom_xray\" + alt_suffix + \".png\";"),
+        ("file_check = string(arg0) + \"/custom_xray_broken.png\";",
+         "file_check = string(arg0) + \"/custom_xray_broken\" + alt_suffix + \".png\";"),
+    };
+
+    // Tracks the currently-selected alt (0 = base) per slot, reset to 0 whenever a NEW character
+    // is freshly selected from the menu (not when merely re-loading for alt-cycling) - inserted
+    // right where the rest of the custom-menu state already gets declared.
+    private const string CustomAltsGlobalsMarker = "custom_menu_pos_lerp = 0;";
+    private const string CustomAltsGlobalsReplacement =
+        "custom_menu_pos_lerp = 0;\ncustom_current_lover_alt = 0;\ncustom_current_partner_alt = 0;";
+
+    // func_set_custom_lover()/func_set_custom_partner() always reload using whatever the current
+    // alt slot is (0 on a fresh select, or the cycled value when re-called by the alt-cycle click
+    // handler below) - so ONLY the fresh-selection call sites reset the slot back to 0, not these
+    // functions themselves (which get called again, deliberately, when cycling).
+    private const string CustomAltsLoverCallMarker =
+        "func_load_custom(ds_list_find_value(custom_lover_folders, custom_lover_selected));";
+    private const string CustomAltsLoverCallReplacement =
+        "func_load_custom(ds_list_find_value(custom_lover_folders, custom_lover_selected), custom_current_lover_alt);";
+    private const string CustomAltsPartnerCallMarker =
+        "func_load_custom(ds_list_find_value(custom_partner_folders, custom_partner_selected));";
+    private const string CustomAltsPartnerCallReplacement =
+        "func_load_custom(ds_list_find_value(custom_partner_folders, custom_partner_selected), custom_current_partner_alt);";
+
+    private const string CustomAltsLoverSelectMarker =
+        "                        custom_lover_selected = i - 1;\n" +
+        "                        func_set_custom_lover();";
+    private const string CustomAltsLoverSelectReplacement =
+        "                        custom_lover_selected = i - 1;\n" +
+        "                        custom_current_lover_alt = 0;\n" +
+        "                        func_set_custom_lover();";
+    private const string CustomAltsPartnerSelectMarker =
+        "                        custom_partner_selected = i - 1;\n" +
+        "                        func_set_custom_partner();";
+    private const string CustomAltsPartnerSelectReplacement =
+        "                        custom_partner_selected = i - 1;\n" +
+        "                        custom_current_partner_alt = 0;\n" +
+        "                        func_set_custom_partner();";
+
+    // Right-click on the existing portrait-swap button's hover zone cycles the alt of whichever
+    // character is currently displayed (alt_portrait mirrors the SAME flag the swap button's own
+    // left-click already uses to know which one that is) - wraps back to 0 if the next-numbered
+    // alt's data file doesn't exist. Left-click's existing swap-portrait behavior is untouched.
+    private const string CustomAltsCycleMarker =
+        "            if (mouse_check_button_pressed(1))\n" +
+        "            {\n" +
+        "                alt_portrait = !alt_portrait;\n" +
+        "                body_jiggle = 0.025;\n" +
+        "                audio_play_sound(sndCloth, 0, 0, 0.6, 0, random_range(0.8, 1.2));\n" +
+        "            }\n";
+    private const string CustomAltsCycleReplacement =
+        CustomAltsCycleMarker +
+        "            if (mouse_check_button_pressed(2))\n" +
+        "            {\n" +
+        "                if (alt_portrait == false && custom_lover_selected > -1)\n" +
+        "                {\n" +
+        "                    var _alt_folder = ds_list_find_value(custom_lover_folders, custom_lover_selected);\n" +
+        "                    custom_current_lover_alt += 1;\n" +
+        "                    if (!file_exists(string(_alt_folder) + \"/custom_data_\" + string(custom_current_lover_alt) + \".futa\"))\n" +
+        "                    {\n" +
+        "                        custom_current_lover_alt = 0;\n" +
+        "                    }\n" +
+        "                    func_set_custom_lover();\n" +
+        "                    body_jiggle = 0.025;\n" +
+        "                    audio_play_sound(sndCloth, 0, 0, 0.6, 0, random_range(0.8, 1.2));\n" +
+        "                }\n" +
+        "                else if (alt_portrait == true && custom_partner_selected > -1)\n" +
+        "                {\n" +
+        "                    var _alt_folder = ds_list_find_value(custom_partner_folders, custom_partner_selected);\n" +
+        "                    custom_current_partner_alt += 1;\n" +
+        "                    if (!file_exists(string(_alt_folder) + \"/custom_data_\" + string(custom_current_partner_alt) + \".spouse\"))\n" +
+        "                    {\n" +
+        "                        custom_current_partner_alt = 0;\n" +
+        "                    }\n" +
+        "                    func_set_custom_partner();\n" +
+        "                    body_jiggle = 0.025;\n" +
+        "                    audio_play_sound(sndCloth, 0, 0, 0.6, 0, random_range(0.8, 1.2));\n" +
+        "                }\n" +
+        "            }\n";
+
+    // Click-scroll: inserted right after the existing mouse-wheel handling for custom_menu_pos,
+    // doing the exact same median-clamped adjustment that wheel input already does.
+    private const string ClickScrollMarker =
+        "        if ((mouse_wheel_up() || mouse_wheel_down()) && abs(custom_menu_pos - custom_menu_pos_lerp) < 0.3)\n" +
+        "        {\n" +
+        "            custom_menu_pos += (mouse_wheel_down() - mouse_wheel_up());\n" +
+        "            custom_menu_pos = median(custom_menu_pos, 0, tab_size - 1);\n" +
+        "        }\n";
+    private const string ClickScrollReplacement =
+        ClickScrollMarker +
+        "        if (tab_size > 1)\n" +
+        "        {\n" +
+        "            var _cs_y = (room_height - 64) + (32 * custom_scale);\n" +
+        "            var _cs_left_hover = point_in_rectangle(mouse_x, mouse_y, 20, _cs_y - 20, 60, _cs_y + 20);\n" +
+        "            var _cs_right_hover = point_in_rectangle(mouse_x, mouse_y, room_width - 60, _cs_y - 20, room_width - 20, _cs_y + 20);\n" +
+        "            draw_set_halign(1);\n" +
+        "            draw_text(40, _cs_y, \"<\");\n" +
+        "            draw_text(room_width - 40, _cs_y, \">\");\n" +
+        "            draw_set_halign(0);\n" +
+        "            if (mouse_check_button_pressed(1) && _cs_left_hover == true)\n" +
+        "            {\n" +
+        "                custom_menu_pos = median(custom_menu_pos - 1, 0, tab_size - 1);\n" +
+        "            }\n" +
+        "            if (mouse_check_button_pressed(1) && _cs_right_hover == true)\n" +
+        "            {\n" +
+        "                custom_menu_pos = median(custom_menu_pos + 1, 0, tab_size - 1);\n" +
+        "            }\n" +
+        "        }\n";
+
+    public static (bool Compatible, bool AlreadyPatched, string Detail) CheckCustomAltsStatus(string dataWinPath)
+    {
+        try
+        {
+            UndertaleData data;
+            using (var stream = new FileStream(dataWinPath, FileMode.Open, FileAccess.Read))
+            {
+                data = UndertaleIO.Read(stream);
+            }
+
+            var createCode = data.Code.FirstOrDefault(c => c is not null && c.Name?.Content == CreateEventName);
+            var drawCode = data.Code.FirstOrDefault(c => c is not null && c.Name?.Content == DrawEventName);
+            if (createCode is null || drawCode is null)
+            {
+                return (false, false, "Not a compatible game (missing oFutaMatingPress).");
+            }
+
+            var globalContext = new GlobalDecompileContext(data);
+            var settings = data.ToolInfo.DecompilerSettings;
+            string createText = new DecompileContext(globalContext, createCode, settings).DecompileToString();
+            if (createText.Contains("alt_suffix"))
+            {
+                return (true, true, "Already patched.");
+            }
+            if (!createText.Contains(CustomAltsLoadSignatureMarker))
+            {
+                return (false, false,
+                    "Couldn't find the expected func_load_custom code in the Create event - this game's " +
+                    "version may not be compatible (this patch is specific to this vanilla install's own " +
+                    "func_load_custom, not ModRoom-style check_custom_futa builds).");
+            }
+            string drawText = new DecompileContext(globalContext, drawCode, settings).DecompileToString();
+            if (!drawText.Contains(CustomAltsCycleMarker) || !drawText.Contains(ClickScrollMarker) ||
+                !drawText.Contains(CustomAltsLoverSelectMarker) || !drawText.Contains(CustomAltsPartnerSelectMarker))
+            {
+                return (false, false,
+                    "Couldn't find the expected portrait-swap button, menu-scroll, or character-select code " +
+                    "in the Draw event - this game's version may not be compatible.");
+            }
+            return (true, false, "Compatible, not yet patched.");
+        }
+        catch (Exception ex)
+        {
+            return (false, false, $"Couldn't check: {ex.Message}");
+        }
+    }
+
+    public static PatchOutcome PatchCustomAlts(string dataWinPath)
+    {
+        try
+        {
+            string backupPath = dataWinPath + ".bak";
+            if (!File.Exists(backupPath))
+            {
+                File.Copy(dataWinPath, backupPath);
+            }
+
+            UndertaleData data;
+            using (var stream = new FileStream(dataWinPath, FileMode.Open, FileAccess.Read))
+            {
+                data = UndertaleIO.Read(stream);
+            }
+
+            var createCode = data.Code.FirstOrDefault(c => c is not null && c.Name?.Content == CreateEventName);
+            var drawCode = data.Code.FirstOrDefault(c => c is not null && c.Name?.Content == DrawEventName);
+            if (createCode is null || drawCode is null)
+            {
+                return new PatchOutcome(PatchResult.NotSupported,
+                    "This doesn't look like a compatible game (missing oFutaMatingPress).");
+            }
+
+            var globalContext = new GlobalDecompileContext(data);
+            var settings = data.ToolInfo.DecompilerSettings;
+
+            string createText = new DecompileContext(globalContext, createCode, settings).DecompileToString();
+            if (createText.Contains("alt_suffix"))
+            {
+                return new PatchOutcome(PatchResult.AlreadyPatched, "Custom alts / click-scroll are already patched in - nothing to do.");
+            }
+            if (!createText.Contains(CustomAltsLoadSignatureMarker))
+            {
+                return new PatchOutcome(PatchResult.NotSupported,
+                    "Couldn't find the expected func_load_custom code in the Create event - this game's " +
+                    "version may not be compatible.");
+            }
+            if (!createText.Contains(CustomAltsGlobalsMarker) || !createText.Contains(CustomAltsLoverCallMarker) ||
+                !createText.Contains(CustomAltsPartnerCallMarker))
+            {
+                return new PatchOutcome(PatchResult.NotSupported,
+                    "Found func_load_custom but not all the other expected markers in the Create event - " +
+                    "this game's version may not be compatible.");
+            }
+
+            string drawText = new DecompileContext(globalContext, drawCode, settings).DecompileToString();
+            if (!drawText.Contains(CustomAltsCycleMarker) || !drawText.Contains(ClickScrollMarker) ||
+                !drawText.Contains(CustomAltsLoverSelectMarker) || !drawText.Contains(CustomAltsPartnerSelectMarker))
+            {
+                return new PatchOutcome(PatchResult.NotSupported,
+                    "Couldn't find the expected portrait-swap button, menu-scroll, or character-select code " +
+                    "in the Draw event - this game's version may not be compatible.");
+            }
+
+            createText = createText.Replace(CustomAltsLoadSignatureMarker, CustomAltsLoadSignatureReplacement);
+            foreach (var (marker, replacement) in CustomAltsFileMarkers)
+            {
+                createText = createText.Replace(marker, replacement);
+            }
+            createText = createText.Replace(CustomAltsGlobalsMarker, CustomAltsGlobalsReplacement);
+            createText = createText.Replace(CustomAltsLoverCallMarker, CustomAltsLoverCallReplacement);
+            createText = createText.Replace(CustomAltsPartnerCallMarker, CustomAltsPartnerCallReplacement);
+
+            drawText = drawText.Replace(CustomAltsCycleMarker, CustomAltsCycleReplacement);
+            drawText = drawText.Replace(ClickScrollMarker, ClickScrollReplacement);
+            drawText = drawText.Replace(CustomAltsLoverSelectMarker, CustomAltsLoverSelectReplacement);
+            drawText = drawText.Replace(CustomAltsPartnerSelectMarker, CustomAltsPartnerSelectReplacement);
+
+            var importGroup = new CodeImportGroup(data) { AutoCreateAssets = false };
+            importGroup.QueueReplace(CreateEventName, createText);
+            importGroup.QueueReplace(DrawEventName, drawText);
+            importGroup.Import();
+
+            using (var outStream = new FileStream(dataWinPath, FileMode.Create, FileAccess.Write))
+            {
+                UndertaleIO.Write(outStream, data);
+            }
+
+            return new PatchOutcome(PatchResult.Patched,
+                "Custom alts + click-scroll buttons patched successfully! Right-click the portrait-swap " +
+                "button to cycle a character's numbered alt looks (custom_data_1.futa/.spouse, etc.); " +
+                $"click-scroll arrows added to the custom character list. A backup of the original was saved as:\n{backupPath}");
+        }
+        catch (Exception ex)
+        {
+            return new PatchOutcome(PatchResult.Error, $"Something went wrong while patching custom alts: {ex.Message}");
         }
     }
 

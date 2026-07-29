@@ -1750,6 +1750,76 @@ applied telemetry patch) to the user's actual WB-ModRoom ".6" install and launch
 clean boot, zero errors, both patches genuinely active together on that real install. Rebuilt the
 installer.
 
+CUSTOM CHARACTER ALTS + CLICK-SCROLL BUTTONS PORTED FROM WB-MODROOM .6 INTO VANILLA (2026-07-28):
+after WB-ModRoom .6 turned out permanently unpatchable for Android (above), user's next request
+was to stop pursuing that fork directly and instead port specific features it added into the base
+vanilla 1.4 install, which works everywhere. User initially wanted "those features" broadly (the
+fork's changelog has ~150 line items covering close to the whole game); pushed back on that scope
+(a full port would mean reverse-engineering and reimplementing a huge fraction of a diverged
+codebase, not something our binary-patching tools can safely automate - user separately floated
+having the launcher auto-diff two data.win files and port whatever's different, which was also
+explained as impractical here: the two Create_0 events are ~2200 vs ~5700+ lines with years of
+independent reordering/refactoring between a shared ancestor, so a raw diff is mostly noise, not a
+clean feature list - and porting into vanilla doesn't "bypass" the Android engine issue via any
+diffing trick, it works simply because vanilla's own code never had the incompatible bytecode
+pattern to begin with). Scoped down via AskUserQuestion to two concrete features: custom character
+alts (numbered variant looks) and click-scroll buttons for the character list.
+
+Investigated by decompiling REAL code from both sides (vanilla's data.win.bak vs WB-ModRoom .6's
+data.win, via --dump-code, never guessed) - tractable specifically because WB-ModRoom .6 is built
+on VANILLA'S OWN func_load_custom system (confirmed earlier this session), not ModRoom V3.2's
+incompatible separate check_custom_futa system. Key finding that reshaped the click-scroll design:
+vanilla's custom menu is a horizontal CAROUSEL (custom_menu_pos/custom_menu_pos_lerp, mouse-wheel
+already adjusts it directly) - completely different from WB-ModRoom .6's vertical scrolling list
+(menu_scroll_update/.scroll struct, confirmed to not exist in vanilla at all, zero matches) - so
+WB-ModRoom .6's click-scroll code couldn't be copy-pasted, needed fresh implementation adapted to
+vanilla's carousel (two arrow buttons doing the same custom_menu_pos +=/-= 1 the wheel already
+does - actually simpler than a literal port).
+
+Implementation (GamePatcherCli/GamePatcher.cs, new --custom-alts patch, mirrored to ApkPatcher/ as
+always):
+  - func_load_custom(arg0) -> func_load_custom(arg0, arg1 = -1), mirrors WB-ModRoom .6's own exact
+    signature change and alt_suffix pattern ("_" + string(arg1) when arg1 > 0). Verified via exact
+    occurrence counts (not assumed) which of the ~10 file-path constructions in this function
+    needed the suffix inserted vs. left alone - the two custom_data.futa/.spouse markers
+    specifically needed the surrounding ini_open(...) context to stay distinct from an EARLIER,
+    unrelated file_exists(...) type-detection check for the identical filename (confirmed each
+    appears exactly twice in the decompiled text) that must NOT get the suffix.
+  - Alt selection: right-click the EXISTING portrait-swap button (reuses its hover zone - no new
+    screen UI, no new art, left-click's original swap behavior completely untouched) cycles
+    whichever character is currently displayed through its numbered alts, wrapping to 0 (base) if
+    the next alt's data file doesn't exist - so a character with zero alt files just silently
+    no-ops on right-click, no separate "alt indicator" needed to hide/show.
+  - Click-scroll: two "<"/">" text buttons (no new sprite needed) flanking the portrait row, doing
+    the exact same median-clamped custom_menu_pos adjustment the mouse wheel already does.
+  - Real implementation bug caught during testing (not assumed correct on the first try): two of
+    the new markers (the fresh-character-selection reset points) actually live in Draw_0, not
+    Create_0 as first written - the initial patch attempt correctly reported NotSupported rather
+    than silently misfiring, caught and fixed by checking each marker's real location, rebuilt,
+    retested clean.
+
+REAL verification, not just "it built": patched a scratch copy of vanilla's pristine data.win.bak,
+copied the real live install's entire 21-character custom\ folder into a scratch test game
+(regression base), and added two synthetic alt-equipped test packs - heaven (futa) with a "_1" alt
+sourced from vivian's sprites, deliberately WITHOUT a custom_condom_1.png to test the missing-alt-
+file fallback path, and Meru (wife) with a "_1" alt sourced from Momo Yaoyorozu's sprites. Real
+launch: all 21 characters including both alt-equipped ones loaded with zero errors, "Entering main
+loop." reached, confirming both the alt-suffix insertion AND the missing-file fallback work
+correctly at the loading level. Base telemetry patch confirmed to still compose cleanly on top
+(matches the existing --hmv/--touch-controls composability pattern). Attempted a live interactive
+UI check via a Windows desktop-automation tool to visually confirm the right-click alt-cycle and
+click-scroll arrows - aborted immediately when the screenshot captured the user's full desktop
+including what looked like a private Discord conversation, unrelated to this task; did not read or
+act on that content. Relying on the log-based regression verification instead - the interactive
+visual/click confirmation (does right-click actually show the alt look, do the arrows render
+without overlapping other UI) genuinely has NOT been done and needs a real playtest, flagged
+honestly rather than assumed.
+
+Applied for real to the live wifes_bedroom_win install (already had the base telemetry patch;
+composed cleanly), confirmed AlreadyPatched afterward, real launch on the actual install - clean
+boot, zero errors, same as the scratch test. Rebuilt/redeployed GamePatcher.exe/ApkPatcher.exe to
+all locations and the installer.
+
 SHARING THIS MOD
 -------------------
 Do NOT share the patched data.win directly - it contains the entire
