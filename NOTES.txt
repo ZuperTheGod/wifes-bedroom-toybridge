@@ -2225,3 +2225,38 @@ publicly.
     Installer recompiled (ISCC, 179,586,615 bytes) and copied into shareable and
     discord-package. The frozen launcher was started once and stayed responsive; the installer
     itself was not test-installed (same single-instance concern as before).
+
+  2026-10-04 (late): "OPEN WITH" / "SHARE" - getting a mod into the game from the Discord PHONE app
+  - Reported by the user after posting the build: the Discord phone app has no way to copy an
+    attachment's download link, only the MESSAGE link, so pasting a link into ADD MOD is awkward
+    on the very devices this is for (it works from Discord on a PC or in a browser).
+  - Fix: the --phone-mods pass of ApkPatcher now also makes the game an "Open with" / "Share"
+    target for mod files.
+      * ApkPatcher\android\PhoneImportActivity.java (package wbmods): copies the opened/shared
+        file to files/phone_inbox/<name>, shows a toast, starts the game, finishes. Built once
+        into phone_import.dex by android\build_dex.cmd (javac --release 8 + d8) and EMBEDDED in
+        ApkPatcher as a resource; added to the APK as the next free classesN.dex.
+      * ApkPatcher\AxmlEditor.cs: a small binary-XML editor that registers the activity in
+        AndroidManifest.xml (Theme.NoDisplay, exported, VIEW and SEND filters for
+        application/zip, x-zip-compressed, json, octet-stream). New strings are appended to the
+        pool so no index changes; android:mimeType's resource id is added by padding the
+        resource map with zeros up to the new string's index. aapt2 parses the result.
+      * GML (both vanilla and ModRoom-style): PhoneModsInboxTop() checks <save>/phone_inbox/
+        about once a second on the title screen and installs one file through
+        PhoneModsInstallBlock(), now shared with the download event.
+    Best-effort: if the manifest isn't shaped as expected the pass still succeeds without it.
+  - Verified on the emulator with the full DeepRoom build: `cmd package query-activities` lists
+    wbmods.PhoneImportActivity for VIEW application/zip; in the Files app, Open with offered
+    "Wife's Bedroom", choosing it started the game and the title showed "ADDED 3 CHARACTER(S)"
+    (3 lovers / 10 wives); Share into the already-running game added them again with no restart
+    (same pid). The stock Files app opens zips itself on a plain tap - the route there is
+    long-press, menu, Open with.
+  - NOT verified: what the Discord phone app itself offers after downloading an attachment
+    (notification, Open, Share...) - only the user can see that; real hardware; a file opened
+    while the player is in the bedroom is only installed once they are back on the title screen.
+  - adb can't hand a content:// uri to another app (SecurityException for uid 2000), so this
+    has to be tested through the Files app UI: VIEW_DOWNLOADS, long-press 294,857, menu
+    1010,126, Open with 680,251, target 109,2171 (portrait 1080x2400).
+  - Exes republished and redeployed to all copies; DeepRoom-3.5.2-Android-full.apk rebuilt.
+    Committed locally only - NOT pushed, no new release yet. The setup video
+    (DeepRoom 3.5.2\setup-video\) was rebuilt around this flow.

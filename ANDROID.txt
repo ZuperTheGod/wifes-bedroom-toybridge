@@ -293,9 +293,16 @@ confirmed against the real Intiface Central or with a real toy moving.
 
 ADDING MODS ON THE PHONE ITSELF (--phone-mods)
 --------------------------------------------------------------------------
-Adds an ADD MOD button to the title screen: paste the https:// link of a mod
-.zip (for example a Discord file link - long-press the file, Copy Link) and
-the game downloads it, unpacks it and lists the characters straight away.
+Two ways to add a mod, both with no PC:
+
+  1. Open the file with the game. Download the mod's .zip on the phone (in the
+     Discord app, tap the file), then open it and choose Wife's Bedroom - or in
+     the Files app press and hold it, Open with (or Share), Wife's Bedroom. The
+     game starts and adds it. This is the way to use from the Discord phone
+     app, which cannot copy a file's download link.
+  2. Paste a link. Tap ADD MOD on the title screen and paste the https:// link
+     of the .zip (Discord on a PC or in a browser: Copy Link on the file). The
+     Discord phone app only copies the MESSAGE link, which does not work.
 Works on vanilla 1.4 and on ModRoom-style mods (ModRoom, DeepRoom).
 
 Full recipe for a ModRoom-style mod, one pass each, in THIS order:

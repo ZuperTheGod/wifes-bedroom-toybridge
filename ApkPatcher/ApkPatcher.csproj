@@ -29,6 +29,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Built from android\PhoneImportActivity.java by android\build_dex.cmd. Embedded rather than
+         shipped beside the exe, so there is no extra file to forget when deploying. -->
+    <EmbeddedResource Include="android\phone_import.dex" LogicalName="phone_import.dex" />
+  </ItemGroup>
+
+  <ItemGroup>
     <None Include="apksigner.jar">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>

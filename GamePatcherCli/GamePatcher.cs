@@ -2101,8 +2101,15 @@ static class GamePatcher
     //      Links must be https:// - the APK has no cleartext-traffic permission. Only .zip:
     //      GameMaker has no rar/7z reader.
     //
-    // The players can't reach this folder with a file manager (it is private app storage), so
-    // the downloader is the only way in besides the starter zip.
+    //   4. Inbox: the Discord phone app cannot copy a file's download link (only the message
+    //      link), so pasting a link is awkward on the very devices this is for. ApkPatcher
+    //      therefore also adds a tiny Android activity (AxmlEditor + phone_import.dex) that
+    //      appears under "Open with" / "Share" for .zip and .json files and copies the file
+    //      to <save area>/phone_inbox/. The title screen checks that folder about once a
+    //      second and installs what it finds, through the same steps as a download.
+    //
+    // The players can't reach these folders with a file manager (private app storage), so
+    // these are the only ways in besides the starter zip.
     //
     // TWO MOD SYSTEMS, two ways of registering a pack:
     //   - Vanilla (func_load_custom): call func_load_custom and file the folder by
@@ -2442,6 +2449,7 @@ static class GamePatcher
         "pm_status = \"\";\n" +
         "pm_url = \"\";\n" +
         "pm_pick = 0;\n" +
+        "pm_inbox_tick = 0;\n" +
         "pm_pick_list = [];\n" +
         "pm_pick_paths = [];\n" +
         "pm_pick_page = 0;\n" +
@@ -2762,6 +2770,86 @@ static class GamePatcher
         "    }\n" +
         "}\n";
 
+    // GML that installs the local file _pm_zip (its name in _pm_fn; _pm_save set): unzip into a
+    // fresh phone_mods/dl_<time>/ folder, register characters, route everything else, and say
+    // what happened in pm_status. Shared by the download event and the inbox check.
+    private static string PhoneModsInstallBlock(string scan, string afterAdded, string route, string looseJson) =>
+        "var _pm_dest = _pm_save + \"/phone_mods/dl_\" + string_replace_all(string_format(date_current_datetime(), 1, 6), \".\", \"_\");\n" +
+        "if (zip_unzip(_pm_zip, _pm_dest + \"/\") <= 0)\n" +
+        "{\n" +
+        "    pm_status = \"That file is not a .zip the game can open.\";\n" +
+        Indent(looseJson) +
+        "}\n" +
+        "else\n" +
+        "{\n" +
+        Indent(scan) +
+        Indent(route) +
+        "    var _pm_what = \"\";\n" +
+        "    if (_pm_added > 0)\n" +
+        "    {\n" +
+        Indent(afterAdded, 2) +
+        "        _pm_what += string(_pm_added) + \" character(s) \";\n" +
+        "    }\n" +
+        "    else\n" +
+        "    {\n" +
+        "        directory_destroy(_pm_dest);\n" +
+        "    }\n" +
+        "    if (_pm_bg > 0)\n" +
+        "    {\n" +
+        "        _pm_what += string(_pm_bg) + \" background(s) \";\n" +
+        "    }\n" +
+        "    if (_pm_dlg > 0)\n" +
+        "    {\n" +
+        "        _pm_what += string(_pm_dlg) + \" dialogue file(s) \";\n" +
+        "    }\n" +
+        "    if (_pm_tex > 0)\n" +
+        "    {\n" +
+        "        _pm_what += string(_pm_tex) + \" texture pack(s) \";\n" +
+        "    }\n" +
+        "    if (_pm_voice > 0)\n" +
+        "    {\n" +
+        "        _pm_what += string(_pm_voice) + \" voice pack(s) \";\n" +
+        "    }\n" +
+        "    if (_pm_what == \"\")\n" +
+        "    {\n" +
+        "        pm_status = \"Nothing the game can use was found in that file.\";\n" +
+        "    }\n" +
+        "    else\n" +
+        "    {\n" +
+        "        pm_status = \"Added \" + _pm_what;\n" +
+        "        if ((_pm_bg + _pm_dlg + _pm_tex) > 0)\n" +
+        "        {\n" +
+        "            pm_status += \"- restart the game to use backgrounds, dialogue and textures.\";\n" +
+        "        }\n" +
+        "        if (_pm_voice > 0)\n" +
+        "        {\n" +
+        "            pm_status += \"- tap VOICES to give a voice to a lover.\";\n" +
+        "        }\n" +
+        "    }\n" +
+        "}\n";
+
+    // Prepended to the Draw event: about once a second on the title screen, install one file the
+    // Android import activity left in the inbox.
+    private static string PhoneModsInboxTop(string scan, string afterAdded, string route, string looseJson) =>
+        "if (" + PhoneModsOnMobile + " && title == true && pm_dialog == -1 && pm_http == -1)\n" +
+        "{\n" +
+        "    pm_inbox_tick++;\n" +
+        "    if (pm_inbox_tick >= 45)\n" +
+        "    {\n" +
+        "        pm_inbox_tick = 0;\n" +
+        Indent(PhoneModsSavePath, 2) +
+        "        var _pm_in = file_find_first(_pm_save + \"/phone_inbox/*\", 0);\n" +
+        "        file_find_close();\n" +
+        "        if (_pm_in != \"\")\n" +
+        "        {\n" +
+        "            var _pm_zip = _pm_save + \"/phone_inbox/\" + _pm_in;\n" +
+        "            var _pm_fn = _pm_in;\n" +
+        Indent(PhoneModsInstallBlock(scan, afterAdded, route, looseJson), 3) +
+        "            file_delete(_pm_zip);\n" +
+        "        }\n" +
+        "    }\n" +
+        "}\n";
+
     // `route` must leave _pm_bg / _pm_dlg / _pm_tex; `looseJson` is GML run when the download
     // turned out not to be a zip (or empty, for forks with nowhere to put a bare .json).
     private static string PhoneModsHttpEventCode(string scan, string afterAdded, string route, string looseJson) =>
@@ -2786,59 +2874,7 @@ static class GamePatcher
         "        var _pm_code = ds_map_find_value(async_load, \"http_status\");\n" +
         "        if (_pm_state == 0 && _pm_code == 200 && file_exists(_pm_zip))\n" +
         "        {\n" +
-        "            var _pm_dest = _pm_save + \"/phone_mods/dl_\" + string_replace_all(string_format(date_current_datetime(), 1, 6), \".\", \"_\");\n" +
-        "            if (zip_unzip(_pm_zip, _pm_dest + \"/\") <= 0)\n" +
-        "            {\n" +
-        "                pm_status = \"That file is not a .zip the game can open.\";\n" +
-        Indent(looseJson, 4) +
-        "            }\n" +
-        "            else\n" +
-        "            {\n" +
-        Indent(scan, 4) +
-        Indent(route, 4) +
-        "                var _pm_what = \"\";\n" +
-        "                if (_pm_added > 0)\n" +
-        "                {\n" +
-        Indent(afterAdded, 5) +
-        "                    _pm_what += string(_pm_added) + \" character(s) \";\n" +
-        "                }\n" +
-        "                else\n" +
-        "                {\n" +
-        "                    directory_destroy(_pm_dest);\n" +
-        "                }\n" +
-        "                if (_pm_bg > 0)\n" +
-        "                {\n" +
-        "                    _pm_what += string(_pm_bg) + \" background(s) \";\n" +
-        "                }\n" +
-        "                if (_pm_dlg > 0)\n" +
-        "                {\n" +
-        "                    _pm_what += string(_pm_dlg) + \" dialogue file(s) \";\n" +
-        "                }\n" +
-        "                if (_pm_tex > 0)\n" +
-        "                {\n" +
-        "                    _pm_what += string(_pm_tex) + \" texture pack(s) \";\n" +
-        "                }\n" +
-        "                if (_pm_voice > 0)\n" +
-        "                {\n" +
-        "                    _pm_what += string(_pm_voice) + \" voice pack(s) \";\n" +
-        "                }\n" +
-        "                if (_pm_what == \"\")\n" +
-        "                {\n" +
-        "                    pm_status = \"Nothing the game can use was found in that file.\";\n" +
-        "                }\n" +
-        "                else\n" +
-        "                {\n" +
-        "                    pm_status = \"Added \" + _pm_what;\n" +
-        "                    if ((_pm_bg + _pm_dlg + _pm_tex) > 0)\n" +
-        "                    {\n" +
-        "                        pm_status += \"- restart the game to use backgrounds, dialogue and textures.\";\n" +
-        "                    }\n" +
-        "                    if (_pm_voice > 0)\n" +
-        "                    {\n" +
-        "                        pm_status += \"- tap VOICES to give a voice to a lover.\";\n" +
-        "                    }\n" +
-        "                }\n" +
-        "            }\n" +
+        Indent(PhoneModsInstallBlock(scan, afterAdded, route, looseJson), 3) +
         "        }\n" +
         "        else\n" +
         "        {\n" +
@@ -2983,18 +3019,21 @@ static class GamePatcher
                     + PhoneModsCreateBlock(PhoneModsScan("_pm_root", ModRoomIsPack, register), "",
                         ModRoomRoute("_pm_root + \"/seed\"", "\"starter\""))
                     + target.CreateText[target.InsertAt..];
-                drawText = PhoneModsPickerTop + PhoneModsDrawTopGeneric + target.DrawText + PhoneModsDrawBottomGeneric + PhoneModsPickerBottom;
-                // A flat zip (files at the top level) takes its name from the link, minus ".zip".
-                httpCode = PhoneModsHttpEventCode(PhoneModsScan("_pm_dest", ModRoomIsPack, register), "",
-                    ModRoomRoute("_pm_dest", "string_copy(_pm_fn, 1, max(1, string_length(_pm_fn) - 4))"), ModRoomLooseJson);
+                // A flat zip (files at the top level) takes its name from the file name, minus ".zip".
+                string scan = PhoneModsScan("_pm_dest", ModRoomIsPack, register);
+                string route = ModRoomRoute("_pm_dest", "string_copy(_pm_fn, 1, max(1, string_length(_pm_fn) - 4))");
+                drawText = PhoneModsPickerTop + PhoneModsDrawTopGeneric + PhoneModsInboxTop(scan, "", route, ModRoomLooseJson)
+                    + target.DrawText + PhoneModsDrawBottomGeneric + PhoneModsPickerBottom;
+                httpCode = PhoneModsHttpEventCode(scan, "", route, ModRoomLooseJson);
             }
             else
             {
                 createText = target.CreateText.Replace(AndroidCustomDiscoveryMarker,
                     AndroidCustomDiscoveryMarker + PhoneModsCreateBlock(PhoneModsScan("_pm_root", VanillaIsPack, VanillaRegister), VanillaAfterScan, ""));
-                drawText = target.DrawText.Replace(PhoneModsDrawEventAnchor, PhoneModsDrawEventAnchor + PhoneModsDrawBlock);
-                httpCode = PhoneModsHttpEventCode(PhoneModsScan("_pm_dest", VanillaIsPack, VanillaRegister),
-                    "custom_sprite_loaded = true;\n", PhoneModsNoRoute, "");
+                string scan = PhoneModsScan("_pm_dest", VanillaIsPack, VanillaRegister);
+                drawText = PhoneModsInboxTop(scan, "custom_sprite_loaded = true;\n", PhoneModsNoRoute, "")
+                    + target.DrawText.Replace(PhoneModsDrawEventAnchor, PhoneModsDrawEventAnchor + PhoneModsDrawBlock);
+                httpCode = PhoneModsHttpEventCode(scan, "custom_sprite_loaded = true;\n", PhoneModsNoRoute, "");
             }
 
             var importGroup = new CodeImportGroup(data) { AutoCreateAssets = false };

@@ -245,6 +245,55 @@ try
             }
         }
 
+        if (phoneModsMode)
+        {
+            // "Open with" / "Share" support: the Discord phone app can't copy a file's download
+            // link, but it does download the file, and a downloaded .zip can then be opened with
+            // the game. That takes a tiny Android activity (extra dex) registered in the manifest;
+            // the patched game installs whatever it drops into files/phone_inbox/. Best-effort:
+            // if the manifest isn't shaped as expected, ADD MOD by link still works.
+            try
+            {
+                var manifestEntry = archive.GetEntry("AndroidManifest.xml")
+                    ?? throw new InvalidDataException("no AndroidManifest.xml");
+                byte[] manifestBytes;
+                using (var manifestIn = manifestEntry.Open())
+                using (var buffer = new MemoryStream())
+                {
+                    manifestIn.CopyTo(buffer);
+                    manifestBytes = buffer.ToArray();
+                }
+
+                if (AxmlEditor.HasImportActivity(manifestBytes))
+                {
+                    Console.WriteLine("\"Open with\" support is already in this APK.");
+                }
+                else
+                {
+                    byte[] newManifest = AxmlEditor.AddImportActivity(manifestBytes);
+                    manifestEntry.Delete();
+                    using (var manifestOut = archive.CreateEntry("AndroidManifest.xml", CompressionLevel.Optimal).Open())
+                    {
+                        manifestOut.Write(newManifest);
+                    }
+
+                    int dexNumber = 2;
+                    while (archive.GetEntry($"classes{dexNumber}.dex") is not null) dexNumber++;
+                    using (var dexIn = typeof(AxmlEditor).Assembly.GetManifestResourceStream("phone_import.dex")
+                        ?? throw new InvalidDataException("phone_import.dex is missing from this build of ApkPatcher"))
+                    using (var dexOut = archive.CreateEntry($"classes{dexNumber}.dex", CompressionLevel.Optimal).Open())
+                    {
+                        dexIn.CopyTo(dexOut);
+                    }
+                    Console.WriteLine("Added \"Open with\" support: a mod .zip can be opened or shared straight into the game.");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Couldn't add \"Open with\" support ({ex.Message}) - ADD MOD by link still works.");
+            }
+        }
+
         if (phoneSeedPath is not null)
         {
             // Starter mods for the --phone-mods patch: the game copies this zip out of the APK
