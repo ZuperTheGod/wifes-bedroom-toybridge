@@ -53,6 +53,9 @@ bool hmvMode = false;
 bool touchControlsMode = false;
 bool customAltsMode = false;
 bool androidCustomDiscoveryMode = false;
+bool phoneModsMode = false;
+bool toyDirectMode = false;
+string? phoneSeedPath = null;
 
 foreach (string arg in args)
 {
@@ -62,6 +65,9 @@ foreach (string arg in args)
     else if (arg == "--touch-controls") touchControlsMode = true;
     else if (arg == "--custom-alts") customAltsMode = true;
     else if (arg == "--android-custom-discovery") androidCustomDiscoveryMode = true;
+    else if (arg == "--phone-mods") phoneModsMode = true;
+    else if (arg == "--toy-direct") toyDirectMode = true;
+    else if (arg == "--phone-seed") { /* consumed below */ }
     else if (arg == "--out") { /* consumed below */ }
     else if (arg == "--replace-data") { /* consumed below */ }
     else if (arg == "--include-mods") { /* consumed below */ }
@@ -72,6 +78,13 @@ for (int i = 0; i < args.Length; i++)
     if (args[i] == "--out" && i + 1 < args.Length) outPath = args[i + 1];
     if (args[i] == "--replace-data" && i + 1 < args.Length) replaceDataPath = args[i + 1];
     if (args[i] == "--include-mods" && i + 1 < args.Length) includeModsPath = args[i + 1];
+    if (args[i] == "--phone-seed" && i + 1 < args.Length) phoneSeedPath = args[i + 1];
+}
+
+if (phoneSeedPath is not null && !File.Exists(phoneSeedPath))
+{
+    Console.WriteLine($"File not found: {phoneSeedPath}");
+    return 1;
 }
 
 if (replaceDataPath is not null && !File.Exists(replaceDataPath))
@@ -163,6 +176,8 @@ try
         : touchControlsMode ? GamePatcher.CheckTouchControlsStatus(tempDataFile)
         : customAltsMode ? GamePatcher.CheckCustomAltsStatus(tempDataFile)
         : androidCustomDiscoveryMode ? GamePatcher.CheckAndroidCustomDiscoveryStatus(tempDataFile)
+        : phoneModsMode ? GamePatcher.CheckPhoneModsStatus(tempDataFile)
+        : toyDirectMode ? GamePatcher.CheckToyDirectStatus(tempDataFile)
         : GamePatcher.CheckStatus(tempDataFile);
     Console.WriteLine($"Compatible: {status.Compatible}   Already patched: {status.AlreadyPatched}   ({status.Detail})");
     if (!status.Compatible)
@@ -174,7 +189,7 @@ try
     {
         if (!skipConfirm)
         {
-            string what = hmvMode ? "HMV mode" : touchControlsMode ? "touch controls" : customAltsMode ? "custom alts" : androidCustomDiscoveryMode ? "Android custom discovery" : "toy telemetry";
+            string what = hmvMode ? "HMV mode" : touchControlsMode ? "touch controls" : customAltsMode ? "custom alts" : androidCustomDiscoveryMode ? "Android custom discovery" : phoneModsMode ? "phone mods folder" : toyDirectMode ? "built-in toy client" : "toy telemetry";
             string action = replaceDataPath is not null
                 ? $"This will build a new APK using the data file you gave it, with {what} added, re-signed, saved at:\n  {outPath}"
                 : $"This will create a patched ({what}), re-signed copy at:\n  {outPath}";
@@ -191,6 +206,8 @@ try
             : touchControlsMode ? GamePatcher.PatchTouchControls(tempDataFile)
             : customAltsMode ? GamePatcher.PatchCustomAlts(tempDataFile)
             : androidCustomDiscoveryMode ? GamePatcher.PatchAndroidCustomDiscovery(tempDataFile)
+            : phoneModsMode ? GamePatcher.PatchPhoneMods(tempDataFile)
+            : toyDirectMode ? GamePatcher.PatchToyDirect(tempDataFile)
             : GamePatcher.Patch(tempDataFile);
         Console.WriteLine($"{outcome.Result}: {outcome.Message}");
         if (outcome.Result != GamePatcher.PatchResult.Patched)
@@ -226,6 +243,21 @@ try
             {
                 entry.Delete();
             }
+        }
+
+        if (phoneSeedPath is not null)
+        {
+            // Starter mods for the --phone-mods patch: the game copies this zip out of the APK
+            // and unzips it into its writable custom/ folder on first launch.
+            const string seedEntryName = "assets/phone_mods_seed.zip";
+            archive.GetEntry(seedEntryName)?.Delete();
+            var seedEntry = archive.CreateEntry(seedEntryName, CompressionLevel.NoCompression);
+            using (var seedEntryStream = seedEntry.Open())
+            using (var seedFileStream = File.OpenRead(phoneSeedPath))
+            {
+                seedFileStream.CopyTo(seedEntryStream);
+            }
+            Console.WriteLine("Bundled the starter mods zip into the APK (needs the --phone-mods patch to be used).");
         }
 
         if (includeModsPath is not null)
@@ -354,7 +386,7 @@ finally
 
 static void PrintUsage()
 {
-    Console.WriteLine("Usage: ApkPatcher <path-to-game.apk> [--replace-data <path-to-data.win>] [--include-mods <path>] [--hmv | --touch-controls | --custom-alts | --android-custom-discovery] [--out <output.apk>] [--yes]");
+    Console.WriteLine("Usage: ApkPatcher <path-to-game.apk> [--replace-data <path-to-data.win>] [--include-mods <path>] [--phone-seed <mods.zip>] [--hmv | --touch-controls | --custom-alts | --android-custom-discovery | --phone-mods | --toy-direct] [--out <output.apk>] [--yes]");
     Console.WriteLine();
     Console.WriteLine("Patches the Android build of a compatible game (Wife's Bedroom / ModRoom / compatible");
     Console.WriteLine("mods) to add Buttplug.io toy telemetry, and produces a new, re-signed APK next to the");

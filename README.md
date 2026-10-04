@@ -26,7 +26,14 @@ Full walkthrough of every tab (Play / Mods / Android) is in [`LAUNCHER.txt`](LAU
 - **HMV mode** - drive toy intensity from any audio file instead of the game (see
   [`HMVMODE.txt`](HMVMODE.txt)).
 - **Android support** - patches an `.apk` with toy support, optionally bundling a PC mod's
-  content and mod folders for phone-only play (see [`ANDROID.txt`](ANDROID.txt)).
+  content and mod folders for phone-only play (see [`ANDROID.txt`](ANDROID.txt)). The launcher's
+  Android tab builds it in one click, including:
+  - **Mods on the phone** - ADD MOD and VOICES buttons on the title screen install a mod `.zip`
+    from an `https://` link (characters, and on ModRoom-style mods also backgrounds, dialogue,
+    texture packs and voice packs) with no PC.
+  - **Built-in toy support** - the game connects to Intiface Central itself, so the phone needs
+    no Termux and no separate bridge.
+  - Works with the official game and ModRoom-style mods (ModRoom, DeepRoom).
 - Linux/macOS are supported too - see [`LINUX-MACOS.txt`](LINUX-MACOS.txt).
 
 ## ModRoom character converter

@@ -166,12 +166,20 @@ Central on mobile, etc.) - this tab only covers the one-time patch step.
      have no touchscreen equivalent at all, and its custom wife/futa picker
      doesn't work on Android without this fix either. Safe to leave checked
      even for the official game - it only changes behavior code paths
-     ModRoom-style mods actually use. When checked, this runs ApkPatcher
-     TWICE behind the scenes (once for the base patch, once for this fix)
-     and cleans up the intermediate file automatically - you'll see both
-     passes logged in the Status box.
-  5. Click "Patch APK". This can take anywhere from several seconds to
-     around a minute depending on the size of the data file - the Status
+     ModRoom-style mods actually use.
+  5. "Add mods on the phone itself" puts ADD MOD and VOICES buttons on the
+     game's title screen: the player pastes the https:// link of a mod .zip
+     (a Discord file link works) and the game installs it with no PC. On
+     by default. See ANDROID.txt for what it can install.
+  6. "Built-in toy support" makes the game connect to Intiface Central by
+     itself, so the phone needs no Termux and no separate bridge. On by
+     default. If you use a machine, set a max ping time in Intiface Central
+     (see ANDROID.txt) so it stops if the game is sent to the background.
+  7. Click "Patch APK". Each checked option is its own pass, run in the
+     right order automatically (up to four); a pass your particular game
+     can't take is skipped and named at the end, not treated as a failure.
+     This can take anywhere from several seconds to a couple of minutes
+     depending on the size of the data file - the Status
      box shows exactly what's happening, and the final line tells you
      where the finished .apk was saved (next to the source APK, by
      default).

@@ -75,6 +75,14 @@ if (args.Length < 1 || args[0] is "-h" or "--help")
     Console.WriteLine("                      This makes them discoverable via a manifest (written by");
     Console.WriteLine("                      ApkPatcher --include-mods). Independent of --custom-alts - apply");
     Console.WriteLine("                      both if wanted, same 2-pass --replace-data chaining as usual.");
+    Console.WriteLine("  --phone-mods        apply the phone-mods-folder patch instead of the toy telemetry");
+    Console.WriteLine("                      patch - on Android the game also loads custom characters from");
+    Console.WriteLine("                      its own writable folder (<save area>/phone_mods/), so they can");
+    Console.WriteLine("                      added after install without rebuilding the APK. Vanilla only.");
+    Console.WriteLine("  --toy-direct        apply the built-in toy client instead of the toy telemetry patch -");
+    Console.WriteLine("                      the game connects to Intiface Central itself, so no separate");
+    Console.WriteLine("                      bridge is needed (made for Android). On PC it only switches on");
+    Console.WriteLine("                      if a file named toy_direct.txt is next to the game.");
     return args.Length < 1 ? 1 : 0;
 }
 
@@ -85,6 +93,8 @@ bool hmvMode = args.Contains("--hmv");
 bool touchControlsMode = args.Contains("--touch-controls");
 bool customAltsMode = args.Contains("--custom-alts");
 bool androidCustomDiscoveryMode = args.Contains("--android-custom-discovery");
+bool phoneModsMode = args.Contains("--phone-mods");
+bool toyDirectMode = args.Contains("--toy-direct");
 bool checkModSystem = args.Contains("--check-mod-system");
 bool dumpVersion = args.Contains("--dump-version");
 int dumpCodeIdx = Array.IndexOf(args, "--dump-code");
@@ -173,6 +183,8 @@ var status = hmvMode ? GamePatcher.CheckHmvStatus(dataPath)
     : touchControlsMode ? GamePatcher.CheckTouchControlsStatus(dataPath)
     : customAltsMode ? GamePatcher.CheckCustomAltsStatus(dataPath)
     : androidCustomDiscoveryMode ? GamePatcher.CheckAndroidCustomDiscoveryStatus(dataPath)
+    : phoneModsMode ? GamePatcher.CheckPhoneModsStatus(dataPath)
+    : toyDirectMode ? GamePatcher.CheckToyDirectStatus(dataPath)
     : GamePatcher.CheckStatus(dataPath);
 Console.WriteLine($"Compatible: {status.Compatible}   Already patched: {status.AlreadyPatched}   ({status.Detail})");
 
@@ -208,6 +220,8 @@ var outcome = hmvMode ? GamePatcher.PatchHmv(dataPath)
     : touchControlsMode ? GamePatcher.PatchTouchControls(dataPath)
     : customAltsMode ? GamePatcher.PatchCustomAlts(dataPath)
     : androidCustomDiscoveryMode ? GamePatcher.PatchAndroidCustomDiscovery(dataPath)
+    : phoneModsMode ? GamePatcher.PatchPhoneMods(dataPath)
+    : toyDirectMode ? GamePatcher.PatchToyDirect(dataPath)
     : GamePatcher.Patch(dataPath);
 Console.WriteLine($"{outcome.Result}: {outcome.Message}");
 return outcome.Result is GamePatcher.PatchResult.Patched or GamePatcher.PatchResult.AlreadyPatched ? 0 : 1;

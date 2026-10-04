@@ -269,3 +269,51 @@ by the person this was built for, and ButtplugBridge's Intiface-connection
 code is identical to the Windows/Linux builds (which are confirmed working),
 so this is expected to work, but hasn't been watched succeed end-to-end in
 one sitting yet.
+
+NO TERMUX: THE GAME CAN TALK TO INTIFACE CENTRAL ITSELF (--toy-direct)
+--------------------------------------------------------------------------
+Steps 3-4 above (Termux + the bridge) can be skipped. Run one more pass on your
+finished APK:
+
+  ApkPatcher your-game-toybridge.apk --toy-direct
+
+Then on the phone you only need the game and Intiface Central:
+  1. Open Intiface Central, start its server (default port 12345), connect
+     your toy.
+  2. In Intiface Central's settings, set the server's max ping time to about
+     1000 ms. THIS MATTERS FOR MACHINES: if you switch away from the game
+     mid-scene, Android freezes it before it can say "stop", and this timeout
+     is what makes Intiface stop the toy by itself. The game's title screen
+     shows "SAFETY: SET MAX PING TIME IN INTIFACE" while it is off.
+  3. Open the game. Top right of the title screen shows "TOY: <your toy>" once
+     connected. Tap that corner to change POWER (start with EASY 0-30).
+
+Status: tested on an Android emulator against a stand-in server only. Not yet
+confirmed against the real Intiface Central or with a real toy moving.
+
+ADDING MODS ON THE PHONE ITSELF (--phone-mods)
+--------------------------------------------------------------------------
+Adds an ADD MOD button to the title screen: paste the https:// link of a mod
+.zip (for example a Discord file link - long-press the file, Copy Link) and
+the game downloads it, unpacks it and lists the characters straight away.
+Works on vanilla 1.4 and on ModRoom-style mods (ModRoom, DeepRoom).
+
+Full recipe for a ModRoom-style mod, one pass each, in THIS order:
+
+  ApkPatcher game.apk --replace-data "mod\data.win" --include-mods "mod" --out 1.apk
+  ApkPatcher 1.apk --phone-mods --out 2.apk
+  ApkPatcher 2.apk --touch-controls --out 3.apk
+  ApkPatcher 3.apk --toy-direct --out final.apk
+
+--phone-mods must come before --touch-controls. Optional: add
+--phone-seed mods.zip to the --phone-mods pass to ship starter mods that are
+unpacked on first launch.
+
+On ModRoom-style mods it also installs backgrounds, dialogue packs (a .zip, or
+a link straight to the .json) and texture packs - restart the game to see
+those. Voice packs (zips with moan_fast / moan_slow folders) are kept too:
+tap VOICES on the title screen, pick the voice, then pick which custom lover
+gets it, and choose that lover again in the game to hear it. Lovers only.
+
+Limits: .zip only (no .rar/.7z), https:// links only, and the button is on the
+title screen.

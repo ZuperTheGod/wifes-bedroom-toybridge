@@ -315,6 +315,8 @@ class Settings:
     AndroidReplaceDataPath: str | None = None
     AndroidModsEnabled: bool = False
     AndroidTouchControls: bool = True
+    AndroidPhoneMods: bool = True
+    AndroidToyDirect: bool = True
 
     @classmethod
     def load(cls, path: Path) -> "Settings":
@@ -1024,12 +1026,16 @@ class MainWindow(QMainWindow):
         # the three has been restored would read the other two's still-default values and clobber
         # their real saved settings before they get their own turn. Restore all three first, THEN
         # sync/persist once at the end via a single explicit call.
-        for checkbox in (self.android_replace_check, self.android_mods_check, self.android_touch_check):
+        android_checks = (self.android_replace_check, self.android_mods_check, self.android_touch_check,
+                          self.android_phone_mods_check, self.android_toy_direct_check)
+        for checkbox in android_checks:
             checkbox.blockSignals(True)
         self.android_replace_check.setChecked(self._settings.AndroidReplaceDataEnabled)
         self.android_mods_check.setChecked(self._settings.AndroidModsEnabled)
         self.android_touch_check.setChecked(self._settings.AndroidTouchControls)
-        for checkbox in (self.android_replace_check, self.android_mods_check, self.android_touch_check):
+        self.android_phone_mods_check.setChecked(self._settings.AndroidPhoneMods)
+        self.android_toy_direct_check.setChecked(self._settings.AndroidToyDirect)
+        for checkbox in android_checks:
             checkbox.blockSignals(False)
         self._update_android_enabled_state()
 
@@ -1592,6 +1598,28 @@ class MainWindow(QMainWindow):
         )
         self.android_touch_check.toggled.connect(self._update_android_enabled_state)
         root.addWidget(self.android_touch_check)
+
+        self.android_phone_mods_check = QCheckBox(
+            "Add mods on the phone itself (ADD MOD and VOICES buttons on the title screen)"
+        )
+        self.android_phone_mods_check.setToolTip(
+            "Lets the player paste the https:// link of a mod .zip (for example a Discord file "
+            "link) on the game's title screen; the game downloads and installs it with no PC. "
+            "Works on the official game and on ModRoom-style mods (ModRoom, DeepRoom)."
+        )
+        self.android_phone_mods_check.toggled.connect(self._update_android_enabled_state)
+        root.addWidget(self.android_phone_mods_check)
+
+        self.android_toy_direct_check = QCheckBox(
+            "Built-in toy support (the game connects to Intiface Central itself - no Termux)"
+        )
+        self.android_toy_direct_check.setToolTip(
+            "Without this, toys on Android need the separate bridge running in Termux. With it, "
+            "only the game and Intiface Central are needed on the phone. For machines, set a max "
+            "ping time in Intiface Central so it stops the toy if the game is sent to the background."
+        )
+        self.android_toy_direct_check.toggled.connect(self._update_android_enabled_state)
+        root.addWidget(self.android_toy_direct_check)
         root.addSpacing(10)
 
         patch_row = QHBoxLayout()
@@ -1626,6 +1654,8 @@ class MainWindow(QMainWindow):
         self._settings.AndroidReplaceDataEnabled = self.android_replace_check.isChecked()
         self._settings.AndroidModsEnabled = self.android_mods_check.isChecked()
         self._settings.AndroidTouchControls = self.android_touch_check.isChecked()
+        self._settings.AndroidPhoneMods = self.android_phone_mods_check.isChecked()
+        self._settings.AndroidToyDirect = self.android_toy_direct_check.isChecked()
         self._settings.save(self._settings_path)
 
     def android_log(self, message: str) -> None:
@@ -1696,54 +1726,64 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "Patch APK", "Pick a mods folder, or uncheck that option.")
                 return
 
-        want_touch_controls = self.android_touch_check.isChecked()
-
         apk_dir = Path(apk_path).resolve().parent
         apk_stem = Path(apk_path).stem
-        final_out = str(apk_dir / f"{apk_stem}-toybridge.apk")
-        # --touch-controls can't be combined with the base patch in one ApkPatcher run (they're
-        # mutually exclusive per-invocation) - same reason the manual workflow needed two separate
-        # commands. When both are wanted, run once into a throwaway intermediate file, then feed
-        # that into a second run for --touch-controls, same composition already verified to work
-        # for --hmv. The intermediate is deleted afterwards so it doesn't look like a second result.
-        step1_out = str(apk_dir / f"{apk_stem}-toybridge-intermediate.apk") if want_touch_controls else final_out
+        final_out = apk_dir / f"{apk_stem}-toybridge.apk"
 
-        step1_args = [str(self._apkpatcher_exe), apk_path]
+        # Each extra patch is its own ApkPatcher run (they're mutually exclusive per invocation),
+        # fed the previous run's output. ORDER MATTERS: --phone-mods copies the game's own
+        # character-discovery code, which --touch-controls then rewrites, so phone mods must come
+        # first. A pass a particular game can't take is skipped rather than failing the build.
+        extra_passes: list[tuple[str, str]] = []
+        if self.android_phone_mods_check.isChecked():
+            extra_passes.append(("--phone-mods", "the ADD MOD / VOICES buttons"))
+        if self.android_touch_check.isChecked():
+            extra_passes.append(("--touch-controls", "touch controls / custom character fix"))
+        if self.android_toy_direct_check.isChecked():
+            extra_passes.append(("--toy-direct", "built-in toy support"))
+
+        work_files = [apk_dir / f"{apk_stem}-toybridge-step{i}.apk" for i in range(len(extra_passes) + 1)]
+        base_args = [str(self._apkpatcher_exe), apk_path]
         if replace_path:
-            step1_args += ["--replace-data", replace_path]
+            base_args += ["--replace-data", replace_path]
         if mods_path:
-            step1_args += ["--include-mods", mods_path]
-        step1_args += ["--out", step1_out, "--yes"]
+            base_args += ["--include-mods", mods_path]
+        base_args += ["--out", str(work_files[0]), "--yes"]
 
         self.android_log("Patching - this can take a little while (decompiling/recompiling the game data)...")
         self.android_patch_btn.setEnabled(False)
         self.setCursor(Qt.CursorShape.WaitCursor)
         QApplication.processEvents()
+        skipped: list[str] = []
         try:
-            if not self._run_apkpatcher(step1_args):
+            if not self._run_apkpatcher(base_args):
                 QMessageBox.critical(self, "Patch APK", "Patching failed - see the status log for details.")
                 return
 
-            if want_touch_controls:
-                self.android_log("Applying touch controls / custom character fix (second pass)...")
+            current = work_files[0]
+            for index, (flag, label) in enumerate(extra_passes, start=1):
+                self.android_log(f"Adding {label} (pass {index + 1} of {len(extra_passes) + 1})...")
                 QApplication.processEvents()
-                step2_args = [str(self._apkpatcher_exe), step1_out, "--touch-controls", "--out", final_out, "--yes"]
-                if not self._run_apkpatcher(step2_args):
-                    QMessageBox.critical(
-                        self, "Patch APK",
-                        f"The base patch succeeded, but the touch-controls pass failed - see the "
-                        f"status log for details. The intermediate file is still at:\n{step1_out}",
-                    )
-                    return
-                try:
-                    os.remove(step1_out)
-                except OSError:
-                    pass
+                if self._run_apkpatcher([str(self._apkpatcher_exe), str(current), flag, "--out", str(work_files[index]), "--yes"]):
+                    current = work_files[index]
+                else:
+                    skipped.append(label)
+                    self.android_log(f"Skipped {label} - this game can't take that patch (see the lines above).")
 
-            QMessageBox.information(self, "Patch APK", f"Done - saved to:\n{final_out}")
+            shutil.copyfile(current, final_out)
+            for leftover in work_files:
+                for path in (leftover, Path(str(leftover) + ".idsig")):
+                    try:
+                        os.remove(path)
+                    except OSError:
+                        pass
+
+            message = f"Done - saved to:\n{final_out}"
+            if skipped:
+                message += "\n\nNot added (this game can't take them): " + ", ".join(skipped) + "."
+            QMessageBox.information(self, "Patch APK", message)
         finally:
             self.android_patch_btn.setEnabled(True)
-            self.unsetCursor()
             self.unsetCursor()
 
     # ------------------------------------------------------------- close ----

@@ -1961,3 +1961,267 @@ Instead, share the buttplug-mod\shareable\ folder, which contains:
     own legitimately-owned copy of the game)
 That folder is self-contained and safe to hand to someone else or post
 publicly.
+
+  2026-10-03: PHONE MODS FOLDER (--phone-mods) - custom characters loadable on Android AFTER
+  install, from the app's own writable folder, no PC and no APK rebuild
+  - Goal: people with no PC at all. Everything so far bundles mods into the APK at build time.
+  - New GamePatcher/ApkPatcher patch --phone-mods (vanilla func_load_custom system only; anchors
+    on the same end-of-PC-discovery-block text as --android-custom-discovery and composes with
+    it in either order): on Android/iOS, enumerates <game_save_id>/phone_mods/<name>/ with
+    file_find_first (which DOES work there - it is a real filesystem, unlike APK assets) and
+    feeds each folder to func_load_custom + the usual switch(custom_load_type).
+  - New ApkPatcher option --phone-seed <mods.zip>: stored as assets/phone_mods_seed.zip; the
+    patched game copies it out (buffer_load -> buffer_save, since zip_unzip needs a real file),
+    zip_unzip's it into phone_mods/ once, and writes phone_mods_seed.done so it never repeats.
+    This doubles as the proof that zip_unzip works on device - the same call an in-game
+    downloader would use.
+  - REAL BUG found by launching a second time (first build used <save>/custom/): the title
+    counter went 1/1/1 -> 2/2/2. Once <save area>/custom exists, vanilla's own "PC" loop (which
+    always runs, since mobile is hardcoded false) finds it too - relative paths resolve to the
+    save area first - so every pack was listed twice. Fixed by naming the folder phone_mods.
+  - Verified on the emulator (Medium_Phone_API_36.0, Play Store image, no root), fresh install,
+    base wifes_bedroom-toybridge.apk + live data.win + --phone-mods + a 3-pack seed zip (gawr
+    gura lover with 21 .ogg, yoruichi partner renamed to "Mixed Case Partner", a bedroom), with
+    NOTHING bundled via --include-mods: title overlay showed LOVERS = 1 / PARTNERS = 1 /
+    BEDROOMS = 1 on three consecutive launches; CUSTOM browser showed the lover's colour
+    portrait and it rendered in the scene when selected. On the first (pre-rename) build the
+    partner's portrait also showed - so the lowercase/underscore path quirk that breaks
+    BUNDLED mixed-case folders does not apply in the writable folder.
+  - NOT verified: real phone hardware; the bedroom actually rendering (only counted); audio
+    actually playing; iOS. NOT built: any way for a user to get a mod INTO phone_mods on their
+    own (the seed zip is build-time). Constraints found for that next step: the APK has
+    INTERNET permission but no usesCleartextTraffic, so in-game http_get_file must use HTTPS;
+    the app is not debuggable and the emulator image has no root, so files can't be pushed in
+    with adb - test via the seed zip instead.
+  - Source updated in ApkPatcher/ and GamePatcherCli/ (mirrored) and built to bin\Release only.
+    The published self-contained exes, shareable/, discord packages and installer were NOT
+    refreshed, and the live installs were NOT patched. Test APK kept as
+    buttplug-mod\wifes_bedroom-phone-mods-test.apk.
+
+  2026-10-03 (later): IN-GAME MOD DOWNLOADER added to --phone-mods
+  - The patch now also adds an "ADD MOD" button to the title screen (Android/iOS only, right
+    side, mirroring CREDITS; both sit outside the 128..room_width-128 "click to begin" hitbox).
+    Tap -> get_string_async asks for a link -> http_get_file to <save>/phone_mods_dl.zip ->
+    zip_unzip into phone_mods/dl_<time>/ -> the new folder is scanned and any packs are
+    registered immediately (no restart). Status text is drawn above the button.
+  - Needs two NEW events on oFutaMatingPress: Other_63 (Async Dialog) and Other_62 (Async
+    HTTP), wired the same way the HMV patch wires Other_68. The patch refuses if the game
+    already has either event. pm_status/pm_dialog/pm_http are initialised on every platform.
+  - Discovery is now a breadth-first scan up to 4 folder levels deep (a queue, not a recursive
+    function - func_load_custom's own file_find_first would clobber an open enumeration, and
+    no new script function has to be created). So zips with a wrapper folder, flat zips and
+    multi-pack zips all work. The seed zip now unpacks to phone_mods/seed/.
+  - Verified on the emulator, fresh install each build: button visible; dialog opens; a real
+    HTTPS zip (github.com/octocat/Hello-World archive, which redirects) downloaded, unzipped
+    and correctly reported "no character or background found"; a missing file reported
+    "download failed (404)"; an http:// link was refused; seed packs still 1/1/1 through the
+    new scanner, and again after a restart. PC: patched data launched and stayed responsive.
+  - Fixed along the way: the game's fonts have no lowercase glyphs (status text is now
+    upper-cased, in the big font, on a backing panel); a 404 "completes" with status 0 and
+    saves the error page, so http_status must be checked before unzipping.
+  - NOT verified: a download that actually CONTAINS a pack (no HTTPS-hosted test pack was
+    available; the registration code is the same scan the seed exercises, but the "added N
+    mods" branch itself has not run). Real hardware. Large downloads.
+  - Limits: https:// only; .zip only (no rar/7z in GameMaker); the button is only on the title
+    screen; no way to remove a mod in-game; a zip with only dialogue/sfx is rejected.
+  - emulator notes: `adb shell input text <url>` works in the dialog (tap the field first, then
+    DONE at 2264,198 and OK at 900,676 on the 2400x1080 AVD); ADD MOD is at 1960,1014.
+  - Still source + bin\Release only; published exes/packages/installer NOT refreshed. Test APK
+    replaced: buttplug-mod\wifes_bedroom-phone-mods-test.apk.
+
+  2026-10-04: DEEPROOM 3.5.2 ON ANDROID - builds and runs on the emulator
+  - Source: "DeepRoom 3.5 KIWAMI-EX.zip" (13.07 MB) from the maker's (Shiratori) pinned message
+    in the DeepRoom thread of the Wife's ModRoom Discord. Extracted to
+    D:\NSFW Games\DeepRoom 3.5.2\. A community Linux port (3.5.2) is pinned too, not used.
+  - Data.win is GameMaker 2024.13.0.0 / bytecode 17 - identical to vanilla 1.4 and ModRoom 3.2,
+    so the existing Android runner fits. ModRoom-style mod system. Toy telemetry and
+    --touch-controls both report compatible; --phone-mods does NOT (vanilla-only patch).
+  - Build (same 2-pass recipe as ModRoom): wifes_bedroom-toybridge.apk as the base (clean assets,
+    our signature) + --replace-data Data.win + --include-mods <DeepRoom folder>, then
+    --touch-controls on the result. Output:
+    D:\NSFW Games\DeepRoom 3.5.2\Android Builds\DeepRoom-3.5.2-Android.apk (17.4 MB).
+  - REAL GAP found: --touch-controls skipped custom-character discovery, because DeepRoom's
+    two discovery loops have much bigger bodies than ModRoom 3.2's (selector name/portrait
+    lists, a "1.4 legacy spouse" branch), so the exact-text match failed. Added a structural
+    fallback (RewriteScanLoop + FutaScanHeader/WifeScanHeader in GamePatcher.cs, both copies):
+    only the enumeration scaffolding is swapped for the manifest reader and the loop body is
+    kept verbatim; on PC with no manifest the original directory_exists() filter still applies.
+    Used only when neither exact ModRoom loop matches, so ModRoom 3.2 is untouched by it.
+  - Verified on the emulator (fresh install): title shows "DEEPROOM 3.52 KIWAMI-EX / 2 CUSTOM
+    LOVER(S) LOADED / 8 CUSTOM WIFE(S) LOADED"; logcat lists both futas and all 8 wives (3
+    "loaded custom wife" + 5 "loaded 1.4 legacy spouse"); the bedroom scene renders with
+    DeepRoom's UI; the WIFE menu opens and CUSTOM is selectable; holding a tap thrusts, score
+    and dialogue update, the x-ray view draws. No crash.
+  - NOT verified: real hardware; whether the selected custom wife looks right (she drew as a
+    plain white body - could be that pack's art or a real rendering fault, needs a human eye);
+    custom lovers in the scene; the pill menu (patch part skipped - layout code differs);
+    drag-to-scroll; toy output. ModRoom 3.2 was NOT re-tested after the patcher change.
+  - Known loose end: the base APK's vanilla assets/dialogue/*.json stay in the APK and
+    DeepRoom's own dialogue/livestream.json is not bundled ("dialogue" is not in --include-mods'
+    folder list). show_debug_message DID reach logcat on this build (tag "yoyo"), unlike the
+    vanilla 1.4 build earlier.
+
+  2026-10-04 (later): BUILT-IN TOY CLIENT (--toy-direct) - the game talks to Intiface Central
+  itself; no Termux bridge on Android
+  - User confirmed DeepRoom-3.5.2-Android.apk on their real phone first: lovers, wives and the
+    pill menu all fine. The target toy is a Hismith thrusting machine (Buttplug "Oscillate" actuator =
+    stroke speed) and asked for toy support inside the game.
+  - New patch --toy-direct in GamePatcher/ApkPatcher (both copies). A GML port of
+    ButtplugBridge: Buttplug spec v3 JSON to ws://127.0.0.1:12345, same mapping (|thrust delta|
+    * 7 every 33 ms, smoothing 0.35, orgasm floor/pulse) and the same power ranges as
+    profiles.json. ScalarCmd for Vibrate/Oscillate, LinearCmd for strokers. Hooks the same two
+    anchors as the telemetry patch, so it applies to vanilla, ModRoom and DeepRoom. Adds an
+    Async Networking event (Other_68), sharing HMV's if that patch is present. Android/iOS only
+    by default; on PC it switches on only if toy_direct.txt sits next to the game.
+  - Title screen, top right: "TOY: <device>" / "POWER: <range> (TAP)" (saved in toy_direct.ini,
+    which can also set port=). The tap is handled before the game's own click code and
+    swallowed with mouse_clear, because DeepRoom's "click to begin" covers the whole screen.
+  - Tested against a stand-in server (scratch fake_intiface.py, python websockets) on PC and on
+    the emulator via `adb reverse tcp:12345 tcp:12345`. REAL BUGS found that way:
+    1. GameMaker's own network_socket_ws on ANDROID answers a WebSocket ping with an unmasked
+       pong; the server closed with "1002 incorrect masking" exactly at each ping (fine on
+       Windows). Buttplug servers ping, so the WebSocket is now HAND-ROLLED over a raw TCP
+       socket (upgrade handshake, masked frames with a zero key, frame reassembly, proper
+       pong). Stable through pings on both platforms afterwards.
+    2. GameMaker reported neither a disconnect event nor a send error when the server dropped
+       the socket - the toy would silently stop working. Added a Buttplug Ping every 4 s (or
+       MaxPingTime/2) and a 12 s silence timeout that reconnects.
+    3. The title screen plays a scene behind the door, so speed commands were sent before the
+       player tapped to begin. Output is now gated on title == false.
+    4. Sending the app to the background freezes the game instantly - no stop can be sent, the
+       last speed stays in force (os_is_paused() did not help; current_time does not advance
+       while frozen). Nothing in GML can prevent this. Mitigation: the client honours the
+       server's MaxPingTime (pings measured every 0.51 s against a 1000 ms timeout), so with a
+       ping timeout set in Intiface the SERVER stops the machine; the title shows "SAFETY: SET
+       MAX PING TIME IN INTIFACE" when the server reports 0; and on return a wall-clock gap
+       check sends StopAllDevices at once (verified).
+    5. A PowerShell-quoted edit dropped a condition line and the game sent StopAllDevices every
+       frame (3381 in one run). Caught from the server log, repaired with a Python edit - do
+       multi-line source edits with Python, not PS string concatenation inside array literals.
+  - Verified on the emulator with the final build: connects, lists the test "Hismith Test
+    Machine", nothing sent on the title screen, 34 speed commands while thrusting, EASY kept
+    values <= 0.30 (max seen 0.24), setting survives a restart, no frames while backgrounded,
+    one StopAllDevices on return, no dropped connections.
+  - NOT verified: the REAL Intiface Central (whether it accepts a spec-v3 client, its actual
+    ping behaviour, and the name/location of its ping-timeout setting - the desktop prefs file
+    has "maxPingTime": 0, so the setting exists); a real toy moving; the port override; iOS.
+    The dev PC's Intiface Central (3.1.0) listens on port 12346, not the default 12345, and
+    does not auto-start its server - it was not run for these tests.
+  - Build: third pass on the DeepRoom APK ->
+    D:\NSFW Games\DeepRoom 3.5.2\Android Builds\DeepRoom-3.5.2-Android-toy.apk.
+    Source + bin\Release only, published exes/packages/installer still NOT refreshed.
+
+  2026-10-04 (later still): --phone-mods NOW WORKS ON ModRoom-STYLE FORKS (DeepRoom, ModRoom 3.2)
+  - User confirmed the built-in toy client on real hardware first: game connects to the real
+    Intiface Central and the Hismith moves.
+  - --phone-mods used to be vanilla-only. ModRoom-style forks each register a character
+    differently (DeepRoom fills selector name/portrait lists and has a "1.4 legacy spouse"
+    branch), so nothing is hard-coded: ExtractLoopBody() lifts the body of the game's OWN
+    custom_futas / custom_wives discovery loops out of the decompiled Create event, swaps the
+    path expression for _pm_path (and directory_exists(...) for true), and ModRoomRegister()
+    replays it for each pack the phone_mods scanner finds - in Create at startup and in the
+    Async HTTP event after a download. custom_data.futa = lover; custom_data.wife/.spouse =
+    partner, so players don't sort mods into type folders. No bedrooms (those load from
+    oBackground in these forks).
+  - ORDER MATTERS: apply --phone-mods BEFORE --touch-controls (which rewrites those loops; the
+    patch says so if applied in the wrong order). Touch-controls still applies on top.
+  - UI on these forks is anchor-free: tap handled at the top of Draw + mouse_clear (DeepRoom's
+    "click to begin" covers the whole screen), button drawn at the end with draw_rectangle,
+    bottom right. Vanilla keeps its CREDITS-mirroring button.
+  - Verified on the emulator, DeepRoom data with NO --include-mods and a 3-pack starter zip
+    (Loona, natsuki, "Bugdiver - Modroom"), through all four passes (data -> --phone-mods +
+    --phone-seed -> --touch-controls -> --toy-direct): title "1 CUSTOM LOVER(S) / 2 CUSTOM
+    WIFE(S)", logcat shows all three loaded (one via each wife branch), same after two
+    relaunches (no double listing); ADD MOD downloaded a real HTTPS zip and reported "no
+    character found", a 404 reported "download failed (404)", neither tap started the game;
+    WIFE > CUSTOM selected a phone-folder wife and she rendered. Vanilla re-patched fine;
+    ModRoom 3.2 reports compatible (not built/run).
+  - Full user build (all four passes WITH --include-mods):
+    D:\NSFW Games\DeepRoom 3.5.2\Android Builds\DeepRoom-3.5.2-Android-full.apk - boots on the
+    emulator, 2 lovers + 8 wives loaded.
+  - NOT verified: a download that actually contains a pack (same gap as vanilla - no HTTPS-
+    hosted test pack); real hardware for this build; custom LOVER selected in the scene from
+    the phone folder; ModRoom 3.2 actually running with it.
+
+  2026-10-04 (evening): ADD MOD NOW ALSO INSTALLS BACKGROUNDS, DIALOGUE AND TEXTURE PACKS on
+  ModRoom-style forks
+  - User confirmed on their phone: ADD MOD works with Discord file links on DeepRoom (two
+    characters added). They asked about backgrounds, sfx, dialogue.
+  - How DeepRoom finds each type (read from the decompiled code, then confirmed on device):
+      backgrounds   oBackground Create: file_find_first(working_directory + "/custom_bedrooms/*")
+      dialogue      oDialogueManager Create: file_find_first("dialogue_packs/*.json")
+      texture packs func_list_texture_packs: file_find_first("texture_packs/*")
+      voice/sfx     NOT a pack type: moan_slow/moan_fast/orgasm folders inside ONE character's
+                    folder (func_get_custom_audio(<character>/moan_slow)).
+    All three scans resolve to the SAVE AREA on Android (same reason vanilla double-listed
+    <save>/custom earlier), so no game code needs changing for them: ModRoomRoute() copies the
+    content out of the unzipped download into <save>/custom_bedrooms/<name>/,
+    <save>/dialogue_packs/<file>.json or <save>/texture_packs/<name>/ and the game's own scans
+    pick it up. PhoneModsCopyTree() does the copying (GameMaker has file_copy only).
+  - Rules: folder with custom_data.bedroom = background; any .json outside a character =
+    dialogue; folder with >= 3 .png and no data file = texture pack, but only if the download
+    has no characters (character zips often carry loose preview images). A link straight to a
+    .json (how dialogue packs are usually posted) is saved as a dialogue pack under the file
+    name from the link. Status line lists what was added and says to restart for these types.
+  - Verified on the emulator (DeepRoom, starter zip with a background, a dialogue json and the
+    science_soldier texture pack, nothing bundled): logcat "Loaded custom background pack:
+    aggro test chamber" on the first launch; FEATURES page lists "PHONE TEST DIALOGUE" and lets
+    SCIENCE_SOLDIER be selected (skin changed). A pasted https .json link reported "Added
+    dialogue pack prettierrc.json - restart the game to use it."
+  - NOT verified: these types through a real downloaded zip (same router code, but only the
+    starter-zip path and the loose-json path were exercised); the background actually selected
+    and drawn; real hardware. Vanilla is unchanged (its func_load_custom already handles
+    bedrooms; its dialogue system is different and not covered).
+  - NOT built: voice/sfx packs (needs a "which character?" picker), removing a mod.
+  - Full user build rebuilt: DeepRoom-3.5.2-Android-full.apk (boots, 2 lovers + 8 wives).
+
+  2026-10-04 (night): VOICE PACKS + PICKER on ModRoom-style forks
+  - A "voice/SFX pack" is not a pack type in this game: it is moan_fast / moan_slow / orgasm
+    folders that func_load_custom_futa reads from inside ONE lover's folder (the wife loaders
+    never read them), so installing one means choosing a lover.
+  - ModRoomRoute(): a folder (outside any character) that has a moan_fast or moan_slow subfolder
+    is one voice; it is copied to <save>/phone_voices/<name>/. A megapack with several such
+    folders becomes several voices.
+  - New VOICES button, title screen bottom left (ADD MOD is bottom right). Opens a two-step
+    picker drawn over the title: choose a voice, then choose a lover (the folder names in
+    custom_futas_folder). It deletes the lover's old .ogg in those three folders, then copies the
+    voice in. For a lover in the phone folder the copy goes straight into its folder; for a lover
+    BUNDLED in the APK (read-only) it goes to <save>/custom_futas/<name>/, the same relative
+    path, which the game resolves first. Taps are handled at the top of Draw and swallowed with
+    mouse_clear while the picker is open; BACK / CANCEL / MORE page through long lists.
+  - Side finding: bundled lovers' own moan folders are NOT read on Android at all (selecting
+    bundled Ironmouse logged no "scanning folder" - directory_exists() is false inside the APK),
+    so giving a bundled lover a voice through the picker is currently the only way it gets one.
+  - Verified on the emulator (DeepRoom, starter zip = the real "Loud And Agressive" pack + a
+    copy of Loona as a phone-folder lover, bundled mods included): picker listed the voice and
+    all three lovers; after giving it to the phone lover and to bundled Loona and selecting each
+    in DeepRoom's own selector grid (the phone lover shows there with its portrait), logcat
+    showed "scanning folder: .../phone_mods/seed/Phone Loona/moan_slow, first file found:
+    moan_slow_7.ogg" and "scanning folder: assets/custom_futas/loona/moan_slow, first file
+    found: moan_slow_7.ogg" (+ moan_fast and orgasm for both). With no voices installed VOICES
+    says so. Full user build rebuilt and booted (2 lovers + 8 wives).
+  - NOT verified: the sound actually PLAYING (the emulator logs "Failed to create AL buffer"
+    on every build, cause unknown; needs ears on a real phone); a voice pack arriving through
+    a real ADD MOD download (the starter-zip path uses the same router); more than one page of
+    lovers; .7z voice packs can't be opened at all.
+  - Also: dark panel behind the ADD MOD status text on these forks (it overlapped the logo).
+
+  2026-10-04 (packaging): everything above is now in the published tools
+  - Confirmed by the user on a real phone since the entries above were written: the built-in
+    toy client connects to the real Intiface Central and the machine moves; ADD MOD installs
+    characters from Discord file links. Still unconfirmed on real hardware: assigned voices
+    actually audible; backgrounds/dialogue/texture packs added through ADD MOD.
+  - Launcher Android tab: two new checkboxes ("Add mods on the phone itself", "Built-in toy
+    support"), both on by default and persisted (AndroidPhoneMods / AndroidToyDirect). "Patch
+    APK" now chains up to four ApkPatcher passes in the required order (base, --phone-mods,
+    --touch-controls, --toy-direct); a pass the game can't take is skipped and named in the
+    final dialog instead of failing the build; intermediates are cleaned up. Verified by
+    driving the real MainWindow offscreen with DeepRoom's files: all four passes ran, one
+    18.2 MB APK left behind, settings saved.
+  - Rebuilt self-contained GamePatcher.exe / ApkPatcher.exe and the PyInstaller launcher and
+    redeployed to every copy (wifes_bedroom_win root, buttplug-mod root, shareable,
+    installer\stage, discord-package-android, both ModRoom V3.2 copies; launcher also to
+    shareable\installer\stage). shareable's source mirror (stale since July) re-synced.
+    Installer recompiled (ISCC, 179,586,615 bytes) and copied into shareable and
+    discord-package. The frozen launcher was started once and stayed responsive; the installer
+    itself was not test-installed (same single-instance concern as before).
