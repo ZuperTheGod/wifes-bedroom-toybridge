@@ -187,6 +187,75 @@ static class GamePatcher
     /// guarantee a fix (our compiler could reproduce the same incompatibility, or a different
     /// one) - always re-verify with a real launch after using this, never assume success.
     /// Backs up the original first, same as every other patch in this file.</summary>
+    // ================================================================================
+    // NEWER-RUNTIME CALLS - for putting a newer game's data into an older Android APK
+    // ================================================================================
+    // Wife's Bedroom 1.5 is built with GameMaker 2024.14, whose compiler turns some array reads
+    // (here: indexing the result of ds_list_find_value in the pill menu) into calls to an internal
+    // function, @@array_get@@. The newest official Android APK (1.4.2) carries the 2024.13 runner,
+    // which doesn't have it, and refuses to start: "Error on load / Unable to find function
+    // @@array_get@@" (seen on the emulator with 1.5's untouched data.win). array_get() is the
+    // public function that does the same and has been in the runner for years, so the code using
+    // the internal one is recompiled with array_get, and the internal function's entry is dropped
+    // (the runner checks every listed function at load, used or not).
+    private static readonly (string Internal, string Public)[] NewerRuntimeCalls =
+    {
+        ("@@array_get@@(", "array_get("),
+    };
+
+    // Returns a one-line note when something was changed, null when nothing needed changing.
+    public static string? FixNewerRuntimeCalls(string dataWinPath)
+    {
+        UndertaleData data;
+        using (var stream = new FileStream(dataWinPath, FileMode.Open, FileAccess.Read))
+        {
+            data = UndertaleIO.Read(stream);
+        }
+        var internals = NewerRuntimeCalls.Select(c => c.Internal.TrimEnd('(')).ToHashSet();
+        var used = data.Functions.Where(f => f?.Name?.Content is string n && internals.Contains(n)).ToList();
+        if (used.Count == 0)
+        {
+            return null;
+        }
+
+        var globalContext = new GlobalDecompileContext(data);
+        var settings = data.ToolInfo.DecompilerSettings;
+        var importGroup = new CodeImportGroup(data) { AutoCreateAssets = false };
+        int changed = 0;
+        foreach (var code in data.Code.Where(c => c is not null && c.ParentEntry is null).ToList())
+        {
+            bool calls = code.Instructions.Any(i => i.ValueFunction is not null && used.Contains(i.ValueFunction));
+            if (!calls)
+            {
+                continue;
+            }
+            string text = new DecompileContext(globalContext, code, settings).DecompileToString();
+            foreach (var (from, to) in NewerRuntimeCalls)
+            {
+                text = text.Replace(from, to);
+            }
+            importGroup.QueueReplace(code.Name.Content, text);
+            changed++;
+        }
+        importGroup.Import();
+
+        // Only drop an entry nothing calls any more.
+        foreach (var function in used)
+        {
+            bool stillCalled = data.Code.Any(c => c is not null && c.Instructions.Any(i => i.ValueFunction == function));
+            if (!stillCalled)
+            {
+                data.Functions.Remove(function);
+            }
+        }
+
+        using (var outStream = new FileStream(dataWinPath, FileMode.Create, FileAccess.Write))
+        {
+            UndertaleIO.Write(outStream, data);
+        }
+        return $"Made the game's code loadable by this APK's older GameMaker runner ({changed} code entr{(changed == 1 ? "y now uses" : "ies now use")} array_get instead of a newer internal function).";
+    }
+
     public static string TouchCode(string dataWinPath, string[] eventNames)
     {
         try
@@ -1398,6 +1467,195 @@ static class GamePatcher
         }
     }
 
+    // ---- extras for ModRoom-style size menus, both best-effort ----
+    // (1) Typing a number on a phone. Next to every size slider these forks have a box to type an
+    // exact number (keyboard_string, committed with Enter), which is also the only way past a
+    // slider's cap. On a phone tapping it does nothing visible: GameMaker never opens the on-screen
+    // keyboard by itself. Reported by a player as "tried keyboard support but no luck".
+    // A tap on a box (or a colour box) now opens the phone's NUMBER keypad. Two things learned
+    // the hard way: the game turns the text into a number with real(), which stops the game with
+    // "unable to convert string to number" for anything else (a player typed a symbol: reproduced
+    // with "2%2A"), so while a box is selected keyboard_string is cut down to digits and one
+    // decimal point every frame (a comma counts as the point); and in landscape the keypad covers
+    // the box, so the value being typed is also shown in a bar at the top of the screen. The
+    // keypad's done key is the game's own Enter; closing the keypad with Back keeps the value too.
+    // A box left empty keeps the value it had (the game itself would turn "" into 0).
+    // (An earlier version used the get_string_async pop-up: readable, but a full keyboard.)
+    // (2) HYPER sizes. Players asked to push the lover's sliders past the cap ("real oversized"
+    // sizes). A HYPER switch in the SIZES menu, off by default and remembered in
+    // <save area>/hyper_sizes.on, makes every lover and wife slider reach 2.5x its normal maximum.
+    // The blockage pill's "cap at 2.0" is also changed so it no longer shrinks balls that are
+    // already bigger than that.
+    private const string TouchExtrasCreate =
+        "tc_kbv = false;\n" +
+        "tc_kbv_seen = false;\n" +
+        "tc_edit_for = -1;\n" +
+        "tc_orig = \"\";\n" +
+        "tc_commit = 0;\n" +
+        "tc_hyper = file_exists(game_save_id + \"hyper_sizes.on\");\n";
+
+    // Top of the Draw event. The game sets keyboard_string when a box is tapped, later in the same
+    // Draw, so the box is seen as selected from the next frame on. Enter is held for two frames so
+    // the game's keyboard_check_pressed(13) sees it whichever way the runner orders the simulated
+    // press against the Draw event (used when the keypad is closed with Back).
+    private const string TouchKeyboardTop =
+        "tc_typing = false;\n" +
+        "if (os_type == os_android || os_type == os_ios)\n" +
+        "{\n" +
+        "    if (tc_commit == 3)\n" +
+        "    {\n" +
+        "        keyboard_key_press(13);\n" +
+        "    }\n" +
+        "    else if (tc_commit == 1)\n" +
+        "    {\n" +
+        "        keyboard_key_release(13);\n" +
+        "    }\n" +
+        "    if (tc_commit > 0)\n" +
+        "    {\n" +
+        "        tc_commit--;\n" +
+        "    }\n" +
+        "    var _tc_sel = -1;\n" +
+        "    if (variable_instance_exists(id, \"customize_selected_input\"))\n" +
+        "    {\n" +
+        "        _tc_sel = customize_selected_input;\n" +
+        "    }\n" +
+        "    if (_tc_sel == -1 && variable_instance_exists(id, \"active_color_input\"))\n" +
+        "    {\n" +
+        "        if (active_color_input != -1)\n" +
+        "        {\n" +
+        "            _tc_sel = 1000 + active_color_input;\n" +
+        "        }\n" +
+        "    }\n" +
+        "    if (_tc_sel != -1)\n" +
+        "    {\n" +
+        "        tc_typing = true;\n" +
+        "        var _tc_raw = string_replace_all(keyboard_string, \",\", \".\");\n" +
+        "        var _tc_num = \"\";\n" +
+        "        var _tc_dot = false;\n" +
+        "        for (var _tc_i = 1; _tc_i <= string_length(_tc_raw); _tc_i++)\n" +
+        "        {\n" +
+        "            var _tc_c = ord(string_char_at(_tc_raw, _tc_i));\n" +
+        "            if (_tc_c >= 48 && _tc_c <= 57)\n" +
+        "            {\n" +
+        "                _tc_num += chr(_tc_c);\n" +
+        "            }\n" +
+        "            else if (_tc_c == 46 && !_tc_dot)\n" +
+        "            {\n" +
+        "                _tc_num += \".\";\n" +
+        "                _tc_dot = true;\n" +
+        "            }\n" +
+        "        }\n" +
+        "        if (string_char_at(_tc_num, 1) == \".\")\n" +
+        "        {\n" +
+        "            _tc_num = \"0\" + _tc_num;\n" +
+        "        }\n" +
+        "        if (_tc_num == \"\" && (keyboard_check_pressed(13) || tc_commit == 3) && tc_edit_for == _tc_sel)\n" +
+        "        {\n" +
+        "            _tc_num = tc_orig;\n" +
+        "        }\n" +
+        "        if (_tc_num != keyboard_string)\n" +
+        "        {\n" +
+        "            keyboard_string = _tc_num;\n" +
+        "        }\n" +
+        "        if (_tc_sel != tc_edit_for)\n" +
+        "        {\n" +
+        "            tc_edit_for = _tc_sel;\n" +
+        "            tc_orig = keyboard_string;\n" +
+        "            keyboard_virtual_show(kbv_type_numbers, kbv_returnkey_done, kbv_autocapitalize_none, false);\n" +
+        "            tc_kbv = true;\n" +
+        "            tc_kbv_seen = false;\n" +
+        "        }\n" +
+        "        else if (tc_kbv && tc_commit == 0)\n" +
+        "        {\n" +
+        "            if (keyboard_virtual_status())\n" +
+        "            {\n" +
+        "                tc_kbv_seen = true;\n" +
+        "            }\n" +
+        "            else if (tc_kbv_seen)\n" +
+        "            {\n" +
+        "                tc_kbv = false;\n" +
+        "                tc_commit = 3;\n" +
+        "            }\n" +
+        "        }\n" +
+        "    }\n" +
+        "    else\n" +
+        "    {\n" +
+        "        tc_edit_for = -1;\n" +
+        "        if (tc_kbv)\n" +
+        "        {\n" +
+        "            keyboard_virtual_hide();\n" +
+        "            tc_kbv = false;\n" +
+        "        }\n" +
+        "    }\n" +
+        "}\n";
+
+    // End of the Draw event: what is being typed, above the keypad.
+    private const string TouchKeyboardBottom =
+        "if (tc_typing && (os_type == os_android || os_type == os_ios))\n" +
+        "{\n" +
+        "    var _tc_ha = draw_get_halign();\n" +
+        "    var _tc_va = draw_get_valign();\n" +
+        "    draw_set_alpha(0.85);\n" +
+        "    draw_rectangle_color(0, 0, room_width, 30, 0, 0, 0, 0, false);\n" +
+        "    draw_set_alpha(1);\n" +
+        "    draw_set_halign(1);\n" +
+        "    draw_set_valign(1);\n" +
+        "    draw_text_transformed_color(room_width / 2, 15, \"VALUE: \" + keyboard_string + \"_   (TICK TO SET)\", 1, 1, 0, 16777215, 16777215, 16777215, 16777215, 1);\n" +
+        "    draw_set_halign(_tc_ha);\n" +
+        "    draw_set_valign(_tc_va);\n" +
+        "}\n";
+
+    private const string TouchHyperAnchor = "comment = \"lover sizes\";";
+    // Drawn as a button in the empty space under the wife's two sliders (rows 3-5 of that column
+    // have nothing in them); sized and placed like the game's own number boxes.
+    private const string TouchHyperToggle =
+        "var _tc_hx = options_x + 58;\n" +
+        "var _tc_hy = options_y + 12;\n" +
+        "var _tc_hh = point_in_rectangle(mouse_x, mouse_y, _tc_hx - 28, _tc_hy + 1, _tc_hx + 28, _tc_hy + 9);\n" +
+        "draw_sprite_ext(sButtonBack, 1, _tc_hx, _tc_hy + 5, 4.2, 1, 0, tc_hyper ? 65535 : 16777215, 0.5 + (0.5 * _tc_hh) + (0.5 * tc_hyper));\n" +
+        "draw_set_halign(1);\n" +
+        "draw_set_valign(0);\n" +
+        "draw_text_ext_transformed(_tc_hx, _tc_hy, tc_hyper ? \"HYPER: ON\" : \"HYPER: OFF\", 12, 100, 0.5, 0.5, 0);\n" +
+        "if (mouse_check_button_pressed(1) && _tc_hh && title == false)\n" +
+        "{\n" +
+        "    tc_hyper = !tc_hyper;\n" +
+        "    if (tc_hyper)\n" +
+        "    {\n" +
+        "        var _tc_f = file_text_open_write(game_save_id + \"hyper_sizes.on\");\n" +
+        "        file_text_write_string(_tc_f, \"1\");\n" +
+        "        file_text_close(_tc_f);\n" +
+        "    }\n" +
+        "    else\n" +
+        "    {\n" +
+        "        file_delete(game_save_id + \"hyper_sizes.on\");\n" +
+        "    }\n" +
+        "}\n";
+
+    private const string TouchBlockageCap = "ball_size = min(ball_size + 0.02, 2);";
+    private const string TouchBlockageCapReplacement = "ball_size = min(ball_size + 0.02, max(2, ball_size));";
+
+    // Returns the Draw text with the HYPER switch and the widened slider ranges, or null when this
+    // fork's size menu doesn't look as expected (then nothing about it is changed).
+    private static string? ApplyHyperSizes(string drawText)
+    {
+        var lover = System.Text.RegularExpressions.Regex.Matches(drawText, @"var slider_lover_max = \[([0-9., ]+)\];");
+        var wife = System.Text.RegularExpressions.Regex.Matches(drawText, @"var slider_wife_max = \[([0-9., ]+)\];");
+        int anchors = drawText.Split(TouchHyperAnchor).Length - 1;
+        if (lover.Count != 1 || wife.Count != 1 || anchors != 1)
+        {
+            return null;
+        }
+        static string Hyper(string list) => string.Join(", ", list.Split(',').Select(v =>
+            (double.Parse(v.Trim(), System.Globalization.CultureInfo.InvariantCulture) * 2.5)
+                .ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)));
+        string Widen(string text, System.Text.RegularExpressions.Match m, string name) =>
+            text.Replace(m.Value, $"var {name} = (tc_hyper ? [{Hyper(m.Groups[1].Value)}] : [{m.Groups[1].Value}]);");
+        drawText = Widen(drawText, lover[0], "slider_lover_max");
+        drawText = Widen(drawText, wife[0], "slider_wife_max");
+        drawText = drawText.Replace(TouchHyperAnchor, TouchHyperAnchor + TouchHyperToggle);
+        return drawText.Replace(TouchBlockageCap, TouchBlockageCapReplacement);
+    }
+
     public static PatchOutcome PatchTouchControls(string dataWinPath)
     {
         try
@@ -1500,6 +1758,27 @@ static class GamePatcher
                 }
             }
 
+            // Phone keyboard + HYPER sizes (see TouchExtrasCreate), each best-effort.
+            bool hyperPatched = false, keyboardPatched = false;
+            if (drawText is not null)
+            {
+                string? withHyper = ApplyHyperSizes(drawText);
+                if (withHyper is not null)
+                {
+                    drawText = withHyper;
+                    hyperPatched = true;
+                }
+                if (drawText.Contains("customize_selected_input") || drawText.Contains("active_color_input"))
+                {
+                    drawText = TouchKeyboardTop + drawText + TouchKeyboardBottom;
+                    keyboardPatched = true;
+                }
+            }
+            if (hyperPatched || keyboardPatched)
+            {
+                createText = createText.Replace(TouchCreateMarker, TouchCreateMarker + TouchExtrasCreate);
+            }
+
             // Right-click long-press is only wired up (and its tracking-state prepend added) when
             // the expected pattern was actually found - see scrollPatched/rightClickPatched above.
             if (rightClickPatched)
@@ -1533,8 +1812,10 @@ static class GamePatcher
             string pillNote = pillMenuPatched
                 ? " Pill menu is now laid out as two columns of 7 (no scrolling needed, nothing can run off-screen)."
                 : " Pill menu code didn't match what was expected (or this game has no pill menu), so that part was skipped.";
+            string extrasNote = (keyboardPatched ? " Tapping a number box now opens the number keypad (digits and one decimal point only)." : "")
+                + (hyperPatched ? " Added a HYPER switch to the SIZES menu (sliders reach 2.5x)." : "");
             return new PatchOutcome(PatchResult.Patched,
-                $"Touch controls patched successfully!{scrollNote}{rightClickNote}{scanNote}{pillNote} A backup of the original was saved as:\n{backupPath}");
+                $"Touch controls patched successfully!{scrollNote}{rightClickNote}{scanNote}{pillNote}{extrasNote} A backup of the original was saved as:\n{backupPath}");
         }
         catch (Exception ex)
         {
@@ -1982,6 +2263,32 @@ static class GamePatcher
         "    }\n" +
         "}\n";
 
+    // Wife's Bedroom 1.5 moved the PC discovery into a function, func_get_custom_characters(),
+    // which the custom menu's new refresh button calls again, and func_load_custom lost its second
+    // argument. The Android code goes right after the game's own startup call to it; refresh only
+    // adds to the lists (it never clears them), so what was found on Android stays listed.
+    private const string AndroidCustomDiscoveryMarkerV15 =
+        "            tutorial = false;\n        }\n    }\n}\n\nfunc_get_custom_characters();\n";
+
+    // The end-of-discovery text this game version has (1.4 or 1.5), or null.
+    private static string? FindDiscoveryAnchor(string createText) =>
+        createText.Contains(AndroidCustomDiscoveryMarker) ? AndroidCustomDiscoveryMarker
+        : createText.Contains(AndroidCustomDiscoveryMarkerV15) ? AndroidCustomDiscoveryMarkerV15
+        : null;
+
+    private static bool LoadCustomTakesOneArg(string createText) =>
+        createText.Contains("function func_load_custom(arg0)\n");
+
+    private static string AndroidCustomDiscoveryFor(string createText, string anchor)
+    {
+        string block = AndroidCustomDiscoveryReplacement[AndroidCustomDiscoveryMarker.Length..];
+        if (LoadCustomTakesOneArg(createText))
+        {
+            block = block.Replace("func_load_custom(_acd_file, -1);", "func_load_custom(_acd_file);");
+        }
+        return anchor + block;
+    }
+
     public static (bool Compatible, bool AlreadyPatched, string Detail) CheckAndroidCustomDiscoveryStatus(string dataWinPath)
     {
         try
@@ -2005,7 +2312,7 @@ static class GamePatcher
             {
                 return (true, true, "Already patched.");
             }
-            if (!createText.Contains(AndroidCustomDiscoveryMarker))
+            if (FindDiscoveryAnchor(createText) is null)
             {
                 return (false, false,
                     "Couldn't find the expected custom-character discovery code in the Create event - this " +
@@ -2050,14 +2357,15 @@ static class GamePatcher
             {
                 return new PatchOutcome(PatchResult.AlreadyPatched, "Android custom character discovery is already patched in - nothing to do.");
             }
-            if (!createText.Contains(AndroidCustomDiscoveryMarker))
+            if (FindDiscoveryAnchor(createText) is null)
             {
                 return new PatchOutcome(PatchResult.NotSupported,
                     "Couldn't find the expected custom-character discovery code in the Create event - this " +
                     "game's version may not be compatible.");
             }
 
-            createText = createText.Replace(AndroidCustomDiscoveryMarker, AndroidCustomDiscoveryReplacement);
+            string anchor = FindDiscoveryAnchor(createText)!;
+            createText = createText.Replace(anchor, AndroidCustomDiscoveryFor(createText, anchor));
 
             var importGroup = new CodeImportGroup(data) { AutoCreateAssets = false };
             importGroup.QueueReplace(CreateEventName, createText);
@@ -2322,6 +2630,204 @@ static class GamePatcher
         "    }\n" +
         "}\n";
 
+    // GML that deletes the folder tree at `path` (a GML expression). Files first, then the
+    // folders deepest-first. On Android directory_destroy does nothing at all, even on an empty
+    // folder (logged on the emulator: the folder is still there afterwards, with or without a
+    // trailing slash) - but file_delete on an empty folder does remove it, so that is the
+    // fallback. Without it a removed voice pack or background stayed listed as an empty folder.
+    private static string PhoneModsRemoveTree(string path) =>
+        "var _pm_xq = [" + path + "];\n" +
+        "var _pm_xi = 0;\n" +
+        "while (_pm_xi < array_length(_pm_xq))\n" +
+        "{\n" +
+        "    var _pm_xd = _pm_xq[_pm_xi];\n" +
+        "    _pm_xi++;\n" +
+        "    var _pm_xn = [];\n" +
+        "    var _pm_xf = file_find_first(_pm_xd + \"/*\", 16);\n" +
+        "    while (_pm_xf != \"\")\n" +
+        "    {\n" +
+        "        if (_pm_xf != \".\" && _pm_xf != \"..\")\n" +
+        "        {\n" +
+        "            array_push(_pm_xn, _pm_xf);\n" +
+        "        }\n" +
+        "        _pm_xf = file_find_next();\n" +
+        "    }\n" +
+        "    file_find_close();\n" +
+        "    for (var _pm_xk = 0; _pm_xk < array_length(_pm_xn); _pm_xk++)\n" +
+        "    {\n" +
+        "        if (directory_exists(_pm_xd + \"/\" + _pm_xn[_pm_xk]))\n" +
+        "        {\n" +
+        "            array_push(_pm_xq, _pm_xd + \"/\" + _pm_xn[_pm_xk]);\n" +
+        "        }\n" +
+        "        else\n" +
+        "        {\n" +
+        "            file_delete(_pm_xd + \"/\" + _pm_xn[_pm_xk]);\n" +
+        "        }\n" +
+        "    }\n" +
+        "}\n" +
+        "for (var _pm_xr = array_length(_pm_xq) - 1; _pm_xr >= 0; _pm_xr--)\n" +
+        "{\n" +
+        "    directory_destroy(_pm_xq[_pm_xr]);\n" +
+        "    if (directory_exists(_pm_xq[_pm_xr]))\n" +
+        "    {\n" +
+        "        file_delete(_pm_xq[_pm_xr]);\n" +
+        "    }\n" +
+        "}\n";
+
+    // Wraps a register step so that a pack the game already has is skipped instead of being
+    // listed twice. "Already has" = a registered pack of the same type with the same data file
+    // AND the same artwork (md5 of up to three of the new pack's .png files, looked up by name
+    // in the other pack). That is what adding the same download twice gives, whatever the zip or
+    // folder got renamed to on the way. The data file alone is not enough: makers often leave it
+    // at the defaults, so unrelated characters share one (seen on the first test - a new partner
+    // was skipped as a copy of a different bundled one). Works against characters bundled in the
+    // APK too: those folders can't be listed, but md5_file reads a named file in them fine.
+    // `pick` is GML that sets _pm_dfile (the data file's name) and _pm_dlist (the ds_list of
+    // that type's registered folders). Needs _pm_dest: nothing inside the folder being installed
+    // is compared against. Skipped folders are only noted in _pm_dupdirs: the caller deletes them
+    // after routing, which still needs to see that the download held characters.
+    private static string PhoneModsSkipDuplicate(string pick, string register) =>
+        pick +
+        "var _pm_dup = false;\n" +
+        "var _pm_hash = \"\";\n" +
+        "if (file_exists(_pm_dir + \"/\" + _pm_dfile))\n" +
+        "{\n" +
+        "    _pm_hash = md5_file(_pm_dir + \"/\" + _pm_dfile);\n" +
+        "}\n" +
+        "var _pm_pn = [];\n" +
+        "var _pm_pf = file_find_first(_pm_dir + \"/*.png\", 0);\n" +
+        "while (_pm_pf != \"\" && array_length(_pm_pn) < 3)\n" +
+        "{\n" +
+        "    array_push(_pm_pn, _pm_pf);\n" +
+        "    _pm_pf = file_find_next();\n" +
+        "}\n" +
+        "file_find_close();\n" +
+        "if (string_length(_pm_hash) == 32 && array_length(_pm_pn) > 0)\n" +
+        "{\n" +
+        "    var _pm_ph = [];\n" +
+        "    for (var _pm_pj = 0; _pm_pj < array_length(_pm_pn); _pm_pj++)\n" +
+        "    {\n" +
+        "        array_push(_pm_ph, md5_file(_pm_dir + \"/\" + _pm_pn[_pm_pj]));\n" +
+        "    }\n" +
+        "    for (var _pm_dn = 0; _pm_dn < ds_list_size(_pm_dlist); _pm_dn++)\n" +
+        "    {\n" +
+        "        var _pm_other = string(ds_list_find_value(_pm_dlist, _pm_dn));\n" +
+        "        if (_pm_other != _pm_dir && string_pos(_pm_dest, _pm_other) != 1 && file_exists(_pm_other + \"/\" + _pm_dfile))\n" +
+        "        {\n" +
+        "            if (md5_file(_pm_other + \"/\" + _pm_dfile) == _pm_hash)\n" +
+        "            {\n" +
+        "                var _pm_same = true;\n" +
+        "                for (var _pm_pj = 0; _pm_pj < array_length(_pm_pn); _pm_pj++)\n" +
+        "                {\n" +
+        "                    if (!file_exists(_pm_other + \"/\" + _pm_pn[_pm_pj]))\n" +
+        "                    {\n" +
+        "                        _pm_same = false;\n" +
+        "                    }\n" +
+        "                    else if (md5_file(_pm_other + \"/\" + _pm_pn[_pm_pj]) != _pm_ph[_pm_pj])\n" +
+        "                    {\n" +
+        "                        _pm_same = false;\n" +
+        "                    }\n" +
+        "                }\n" +
+        "                if (_pm_same)\n" +
+        "                {\n" +
+        "                    _pm_dup = true;\n" +
+        "                }\n" +
+        "            }\n" +
+        "        }\n" +
+        "    }\n" +
+        "}\n" +
+        "if (_pm_dup)\n" +
+        "{\n" +
+        "    _pm_dups++;\n" +
+        "    array_push(_pm_dupdirs, _pm_dir);\n" +
+        "}\n" +
+        "else\n" +
+        "{\n" +
+        Indent(register) +
+        "}\n";
+
+    private const string VanillaDupPick =
+        "var _pm_dfile = \"custom_data.bedroom\";\n" +
+        "var _pm_dlist = custom_bedroom_folders;\n" +
+        "if (file_exists(_pm_dir + \"/custom_data.futa\"))\n" +
+        "{\n" +
+        "    _pm_dfile = \"custom_data.futa\";\n" +
+        "    _pm_dlist = custom_lover_folders;\n" +
+        "}\n" +
+        "else if (file_exists(_pm_dir + \"/custom_data.spouse\"))\n" +
+        "{\n" +
+        "    _pm_dfile = \"custom_data.spouse\";\n" +
+        "    _pm_dlist = custom_partner_folders;\n" +
+        "}\n";
+
+    private const string ModRoomDupPick =
+        "var _pm_dfile = \"custom_data.spouse\";\n" +
+        "var _pm_dlist = custom_wives_folder;\n" +
+        "if (file_exists(_pm_dir + \"/custom_data.futa\"))\n" +
+        "{\n" +
+        "    _pm_dfile = \"custom_data.futa\";\n" +
+        "    _pm_dlist = custom_futas_folder;\n" +
+        "}\n" +
+        "else if (file_exists(_pm_dir + \"/custom_data.wife\"))\n" +
+        "{\n" +
+        "    _pm_dfile = \"custom_data.wife\";\n" +
+        "}\n";
+
+    private const string PhoneModsAnyPack =
+        "file_exists(_pm_dir + \"/custom_data.futa\") || file_exists(_pm_dir + \"/custom_data.wife\") || file_exists(_pm_dir + \"/custom_data.spouse\") || file_exists(_pm_dir + \"/custom_data.bedroom\")";
+
+    // GML that words the result of an install into pm_status. The arguments are GML expressions
+    // for how many of each kind were added (and how many were skipped as already installed).
+    private static string PhoneModsStatusText(string chars, string bg, string dlg, string tex, string voice, string dups) =>
+        "var _pm_what = \"\";\n" +
+        "if (" + chars + " > 0)\n" +
+        "{\n" +
+        "    _pm_what += string(" + chars + ") + \" character(s) \";\n" +
+        "}\n" +
+        "if (" + bg + " > 0)\n" +
+        "{\n" +
+        "    _pm_what += string(" + bg + ") + \" background(s) \";\n" +
+        "}\n" +
+        "if (" + dlg + " > 0)\n" +
+        "{\n" +
+        "    _pm_what += string(" + dlg + ") + \" dialogue file(s) \";\n" +
+        "}\n" +
+        "if (" + tex + " > 0)\n" +
+        "{\n" +
+        "    _pm_what += string(" + tex + ") + \" texture pack(s) \";\n" +
+        "}\n" +
+        "if (" + voice + " > 0)\n" +
+        "{\n" +
+        "    _pm_what += string(" + voice + ") + \" voice pack(s) \";\n" +
+        "}\n" +
+        "if (_pm_what == \"\")\n" +
+        "{\n" +
+        "    if (" + dups + " > 0)\n" +
+        "    {\n" +
+        "        pm_status = \"Already installed - nothing new was added.\";\n" +
+        "    }\n" +
+        "    else\n" +
+        "    {\n" +
+        "        pm_status = \"Nothing the game can use was found in that file.\";\n" +
+        "    }\n" +
+        "}\n" +
+        "else\n" +
+        "{\n" +
+        "    pm_status = \"Added \" + _pm_what;\n" +
+        "    if (" + dups + " > 0)\n" +
+        "    {\n" +
+        "        pm_status += \"- skipped \" + string(" + dups + ") + \" already installed \";\n" +
+        "    }\n" +
+        "    if ((" + bg + " + " + dlg + " + " + tex + ") > 0)\n" +
+        "    {\n" +
+        "        pm_status += \"- restart the game to use backgrounds, dialogue and textures.\";\n" +
+        "    }\n" +
+        "    if (" + voice + " > 0)\n" +
+        "    {\n" +
+        "        pm_status += \"- tap VOICES to give a voice to a lover.\";\n" +
+        "    }\n" +
+        "}\n";
+
     private const string PhoneModsNoRoute = "var _pm_bg = 0;\nvar _pm_dlg = 0;\nvar _pm_tex = 0;\nvar _pm_voice = 0;\n";
 
     // GML that walks the unzipped folder `rootVar` (its display name in `rootName`) and installs
@@ -2452,6 +2958,25 @@ static class GamePatcher
         "pm_inbox_tick = 0;\n" +
         "pm_pick_list = [];\n" +
         "pm_pick_paths = [];\n" +
+        "pm_pick_kinds = [];\n" +
+        "pm_rm_path = \"\";\n" +
+        "pm_rm_name = \"\";\n" +
+        "pm_rm_kind = 0;\n" +
+        "pm_seq = 0;\n" +
+        "pm_bt_n = 0;\n" +
+        "pm_bt_a = 0;\n" +
+        "pm_bt_bg = 0;\n" +
+        "pm_bt_dlg = 0;\n" +
+        "pm_bt_tex = 0;\n" +
+        "pm_bt_voice = 0;\n" +
+        "pm_bt_dups = 0;\n" +
+        // Removing a mod restarts the game (game_restart) so its lists are rebuilt; globals are
+        // the one thing that survives that, so the "Removed ..." message rides in one.
+        "if (variable_global_exists(\"pm_note\"))\n" +
+        "{\n" +
+        "    pm_status = string(global.pm_note);\n" +
+        "    global.pm_note = \"\";\n" +
+        "}\n" +
         "pm_pick_page = 0;\n" +
         "pm_voice_sel = \"\";\n" +
         "pm_voice_name = \"\";\n" +
@@ -2554,21 +3079,90 @@ static class GamePatcher
         "    draw_set_valign(_pm_va);\n" +
         "}\n";
 
-    // ---- voice picker (ModRoom-style). pm_pick: 0 closed, 1 choosing a voice, 2 choosing a lover.
+    // ---- picker screen. pm_pick: 0 closed, 1 choosing a voice, 2 choosing a lover for it
+    // (both ModRoom-style only), 3 choosing a mod to remove, 4 confirming the removal.
+    private const string PhoneModsRemoveRect = "10, room_height - 80, 150, room_height - 52";
     private const string PhoneModsVoicesRect = "10, room_height - 46, 150, room_height - 18";
 
     // Shared by the tap handler and the drawing code so the rows line up exactly.
     private const string PhoneModsPickLayout =
-        "var _pk_rows = max(3, floor((room_height - 84) / 24));\n" +
-        "var _pk_x1 = (room_width / 2) - 170;\n" +
-        "var _pk_x2 = (room_width / 2) + 170;\n" +
-        "var _pk_y0 = 40;\n" +
-        "var _pk_by = room_height - 34;\n" +
+        // Vanilla's room is about twice the size of the ModRoom forks' in pixels, so one fixed
+        // layout would be finger-sized on one and tiny on the other: everything scales by _pk_s.
+        "var _pk_s = max(1, round(room_height / 300));\n" +
+        "var _pk_rows = max(3, floor((room_height - (84 * _pk_s)) / (24 * _pk_s)));\n" +
+        "var _pk_x1 = (room_width / 2) - (170 * _pk_s);\n" +
+        "var _pk_x2 = (room_width / 2) + (170 * _pk_s);\n" +
+        "var _pk_y0 = 40 * _pk_s;\n" +
+        "var _pk_by = room_height - (34 * _pk_s);\n" +
         "var _pk_first = pm_pick_page * _pk_rows;\n";
 
     // Prepended to the Draw event, ahead of the game's own click code. While the picker is open
     // every tap is swallowed, so nothing behind it reacts.
-    private static readonly string PhoneModsPickerTop =
+    private static readonly string PhoneModsRemoveBranches =
+        "if (pm_pick == 3)\n" +
+        "{\n" +
+        "    pm_rm_path = pm_pick_paths[_pk_hit];\n" +
+        "    pm_rm_kind = pm_pick_kinds[_pk_hit];\n" +
+        "    pm_rm_name = pm_pick_list[_pk_hit];\n" +
+        "    pm_pick_list = [\"YES - REMOVE IT\", \"NO - KEEP IT\"];\n" +
+        "    pm_pick_paths = [\"\", \"\"];\n" +
+        "    pm_pick_kinds = [0, 0];\n" +
+        "    pm_pick_page = 0;\n" +
+        "    pm_pick = 4;\n" +
+        "}\n" +
+        "else if (pm_pick == 4)\n" +
+        "{\n" +
+        "    pm_pick = 0;\n" +
+        Indent(PhoneModsSavePath) +
+        "    if (_pk_hit == 0 && string_pos(_pm_save + \"/\", pm_rm_path) == 1)\n" +
+        "    {\n" +
+        "        if (pm_rm_kind == 1)\n" +
+        "        {\n" +
+        "            file_delete(pm_rm_path);\n" +
+        "        }\n" +
+        "        else\n" +
+        "        {\n" +
+        Indent(PhoneModsRemoveTree("pm_rm_path"), 3) +
+        "            var _rm_cut = string_pos(\"/phone_mods/\", pm_rm_path);\n" +
+        "            if (_rm_cut > 0)\n" +
+        "            {\n" +
+        "                var _rm_rest = string_delete(pm_rm_path, 1, _rm_cut + 11);\n" +
+        "                if (string_pos(\"/\", _rm_rest) > 0)\n" +
+        "                {\n" +
+        "                    var _rm_top = string_copy(pm_rm_path, 1, _rm_cut + 11) + string_copy(_rm_rest, 1, string_pos(\"/\", _rm_rest) - 1);\n" +
+        Indent(PhoneModsScan("_rm_top", PhoneModsAnyPack, "_pm_added++;\n"), 5) +
+        "                    if (_pm_added == 0)\n" +
+        "                    {\n" +
+        Indent(PhoneModsRemoveTree("_rm_top"), 6) +
+        "                    }\n" +
+        "                }\n" +
+        "            }\n" +
+        "        }\n" +
+        "        if (pm_rm_kind == 2)\n" +
+        "        {\n" +
+        "            pm_status = \"Removed \" + pm_rm_name + \". A lover that was given this voice keeps it.\";\n" +
+        "        }\n" +
+        "        else\n" +
+        "        {\n" +
+        "            global.pm_note = \"Removed \" + pm_rm_name + \".\";\n" +
+        "            var _rm_socks = [\"tb_sock\", \"hmv_socket\", \"buttplug_socket\"];\n" +
+        "            for (var _rm_s = 0; _rm_s < 3; _rm_s++)\n" +
+        "            {\n" +
+        "                if (variable_instance_exists(id, _rm_socks[_rm_s]))\n" +
+        "                {\n" +
+        "                    var _rm_sv = variable_instance_get(id, _rm_socks[_rm_s]);\n" +
+        "                    if (is_real(_rm_sv) && _rm_sv >= 0)\n" +
+        "                    {\n" +
+        "                        network_destroy(_rm_sv);\n" +
+        "                    }\n" +
+        "                }\n" +
+        "            }\n" +
+        "            game_restart();\n" +
+        "        }\n" +
+        "    }\n" +
+        "}\n";
+
+    private static readonly string PhoneModsPickerHead =
         "if (" + PhoneModsOnMobile + " && title == true && pm_dialog == -1 && pm_http == -1)\n" +
         "{\n" +
         Indent(PhoneModsPickLayout) +
@@ -2579,14 +3173,17 @@ static class GamePatcher
         "            var _pk_hit = -1;\n" +
         "            for (var _pk_i = 0; _pk_i < _pk_rows; _pk_i++)\n" +
         "            {\n" +
-        "                if (point_in_rectangle(mouse_x, mouse_y, _pk_x1, _pk_y0 + (_pk_i * 24), _pk_x2, _pk_y0 + (_pk_i * 24) + 21))\n" +
+        "                if (point_in_rectangle(mouse_x, mouse_y, _pk_x1, _pk_y0 + (_pk_i * 24 * _pk_s), _pk_x2, _pk_y0 + (_pk_i * 24 * _pk_s) + (21 * _pk_s)))\n" +
         "                {\n" +
         "                    _pk_hit = _pk_first + _pk_i;\n" +
         "                }\n" +
         "            }\n" +
         "            if (_pk_hit >= 0 && _pk_hit < array_length(pm_pick_list))\n" +
         "            {\n" +
-        "                if (pm_pick == 1)\n" +
+        // Removal. The game keeps its own lists of what it loaded (and each fork keeps different
+        // ones), so after deleting the files the game is restarted and rebuilds them itself.
+        Indent(PhoneModsRemoveBranches, 4) +
+        "                else if (pm_pick == 1)\n" +
         "                {\n" +
         "                    pm_voice_sel = pm_pick_paths[_pk_hit];\n" +
         "                    pm_voice_name = pm_pick_list[_pk_hit];\n" +
@@ -2647,27 +3244,29 @@ static class GamePatcher
         "                    pm_pick = 0;\n" +
         "                }\n" +
         "            }\n" +
-        "            else if (point_in_rectangle(mouse_x, mouse_y, _pk_x1, _pk_by, _pk_x1 + 90, _pk_by + 22))\n" +
+        "            else if (point_in_rectangle(mouse_x, mouse_y, _pk_x1, _pk_by, _pk_x1 + (90 * _pk_s), _pk_by + (22 * _pk_s)))\n" +
         "            {\n" +
         "                if (pm_pick_page > 0)\n" +
         "                {\n" +
         "                    pm_pick_page--;\n" +
         "                }\n" +
         "            }\n" +
-        "            else if (point_in_rectangle(mouse_x, mouse_y, _pk_x2 - 90, _pk_by, _pk_x2, _pk_by + 22))\n" +
+        "            else if (point_in_rectangle(mouse_x, mouse_y, _pk_x2 - (90 * _pk_s), _pk_by, _pk_x2, _pk_by + (22 * _pk_s)))\n" +
         "            {\n" +
         "                if ((_pk_first + _pk_rows) < array_length(pm_pick_list))\n" +
         "                {\n" +
         "                    pm_pick_page++;\n" +
         "                }\n" +
         "            }\n" +
-        "            else if (point_in_rectangle(mouse_x, mouse_y, (room_width / 2) - 50, _pk_by, (room_width / 2) + 50, _pk_by + 22))\n" +
+        "            else if (point_in_rectangle(mouse_x, mouse_y, (room_width / 2) - (50 * _pk_s), _pk_by, (room_width / 2) + (50 * _pk_s), _pk_by + (22 * _pk_s)))\n" +
         "            {\n" +
         "                pm_pick = 0;\n" +
         "            }\n" +
         "            mouse_clear(1);\n" +
         "        }\n" +
-        "    }\n" +
+        "    }\n";
+
+    private static readonly string PhoneModsVoicesTap =
         "    else if (mouse_check_button_pressed(1) && point_in_rectangle(mouse_x, mouse_y, " + PhoneModsVoicesRect + "))\n" +
         "    {\n" +
         Indent(PhoneModsSavePath, 2) +
@@ -2694,22 +3293,92 @@ static class GamePatcher
         "            pm_pick = 1;\n" +
         "        }\n" +
         "        mouse_clear(1);\n" +
+        "    }\n";
+
+    // GML that lists one save-area folder's entries into the remove list. kind: 0 = folder,
+    // 1 = single file, 2 = folder that needs no restart (a stored voice pack).
+    private static string PhoneModsRemoveListFolder(string folder, string label, int kind, bool files) =>
+        "var _rm_f = file_find_first(_pm_save + \"/" + folder + "/*\", 16);\n" +
+        "while (_rm_f != \"\")\n" +
+        "{\n" +
+        "    if (_rm_f != \".\" && _rm_f != \"..\" && directory_exists(_pm_save + \"/" + folder + "/\" + _rm_f) == " + (files ? "false" : "true") + ")\n" +
+        "    {\n" +
+        "        array_push(pm_pick_list, \"" + label + " - \" + _rm_f);\n" +
+        "        array_push(pm_pick_paths, _pm_save + \"/" + folder + "/\" + _rm_f);\n" +
+        "        array_push(pm_pick_kinds, " + kind + ");\n" +
+        "    }\n" +
+        "    _rm_f = file_find_next();\n" +
+        "}\n" +
+        "file_find_close();\n";
+
+    // Everything ADD MOD / Open with / the starter zip put on this phone. Characters bundled
+    // inside the APK are not listed: they are read-only and cannot be deleted.
+    private static string PhoneModsRemoveList(string isPack, bool modRoom) =>
+        "pm_pick_list = [];\n" +
+        "pm_pick_paths = [];\n" +
+        "pm_pick_kinds = [];\n" +
+        PhoneModsSavePath +
+        "var _rm_root = _pm_save + \"/phone_mods\";\n" +
+        PhoneModsScan("_rm_root", isPack,
+            "var _rm_label = \"PARTNER\";\n" +
+            "if (file_exists(_pm_dir + \"/custom_data.futa\"))\n" +
+            "{\n" +
+            "    _rm_label = \"LOVER\";\n" +
+            "}\n" +
+            "else if (file_exists(_pm_dir + \"/custom_data.bedroom\"))\n" +
+            "{\n" +
+            "    _rm_label = \"BACKGROUND\";\n" +
+            "}\n" +
+            "array_push(pm_pick_list, _rm_label + \" - \" + _pm_name);\n" +
+            "array_push(pm_pick_paths, _pm_dir);\n" +
+            "array_push(pm_pick_kinds, 0);\n") +
+        (modRoom
+            ? PhoneModsRemoveListFolder("custom_bedrooms", "BACKGROUND", 0, false) +
+              PhoneModsRemoveListFolder("dialogue_packs", "DIALOGUE", 1, true) +
+              PhoneModsRemoveListFolder("texture_packs", "TEXTURES", 0, false) +
+              PhoneModsRemoveListFolder("phone_voices", "VOICE", 2, false)
+            : "");
+
+    // Prepended to the Draw event, ahead of the game's own click code.
+    private static string PhoneModsPickerTop(bool voices, string removeList) =>
+        PhoneModsPickerHead +
+        (voices ? PhoneModsVoicesTap : "") +
+        "    else if (mouse_check_button_pressed(1) && point_in_rectangle(mouse_x, mouse_y, " + PhoneModsRemoveRect + "))\n" +
+        "    {\n" +
+        Indent(removeList, 2) +
+        "        pm_pick_page = 0;\n" +
+        "        if (array_length(pm_pick_list) == 0)\n" +
+        "        {\n" +
+        "            pm_status = \"Nothing to remove. Only mods added on this phone can be removed.\";\n" +
+        "        }\n" +
+        "        else\n" +
+        "        {\n" +
+        "            pm_pick = 3;\n" +
+        "        }\n" +
+        "        mouse_clear(1);\n" +
         "    }\n" +
         "}\n";
 
     // Appended after the ADD MOD drawing, so the open picker covers it.
-    private static readonly string PhoneModsPickerBottom =
+    private static string PhoneModsPickerBottom(bool voices) =>
         "\nif (" + PhoneModsOnMobile + " && title == true)\n" +
         "{\n" +
         "    var _pk_ha = draw_get_halign();\n" +
         "    var _pk_va = draw_get_valign();\n" +
         "    draw_set_halign(1);\n" +
         "    draw_set_valign(1);\n" +
-        "    var _pk_vh = point_in_rectangle(mouse_x, mouse_y, " + PhoneModsVoicesRect + ");\n" +
-        "    draw_set_alpha(0.45 + (0.3 * _pk_vh));\n" +
-        "    draw_rectangle_color(" + PhoneModsVoicesRect + ", 0, 0, 0, 0, false);\n" +
+        (voices
+            ? "    var _pk_vh = point_in_rectangle(mouse_x, mouse_y, " + PhoneModsVoicesRect + ");\n" +
+              "    draw_set_alpha(0.45 + (0.3 * _pk_vh));\n" +
+              "    draw_rectangle_color(" + PhoneModsVoicesRect + ", 0, 0, 0, 0, false);\n" +
+              "    draw_set_alpha(1);\n" +
+              "    draw_text_color(80, room_height - 32, \"VOICES\", 16777215, 16777215, 16777215, 16777215, 1);\n"
+            : "") +
+        "    var _pk_rh0 = point_in_rectangle(mouse_x, mouse_y, " + PhoneModsRemoveRect + ");\n" +
+        "    draw_set_alpha(0.45 + (0.3 * _pk_rh0));\n" +
+        "    draw_rectangle_color(" + PhoneModsRemoveRect + ", 0, 0, 0, 0, false);\n" +
         "    draw_set_alpha(1);\n" +
-        "    draw_text_color(80, room_height - 32, \"VOICES\", 16777215, 16777215, 16777215, 16777215, 1);\n" +
+        "    draw_text_color(80, room_height - 66, \"REMOVE MOD\", 16777215, 16777215, 16777215, 16777215, 1);\n" +
         "    if (pm_pick > 0)\n" +
         "    {\n" +
         Indent(PhoneModsPickLayout, 2) +
@@ -2719,29 +3388,39 @@ static class GamePatcher
         "        var _pk_title = \"CHOOSE A VOICE PACK\";\n" +
         "        if (pm_pick == 2)\n" +
         "        {\n" +
-        "            _pk_title = \"GIVE \" + string_upper(string_copy(pm_voice_name, 1, 20)) + \" TO WHICH LOVER?\";\n" +
+        "            _pk_title = \"GIVE \" + string_upper(string_copy(pm_voice_name, 1, 14)) + \" TO WHICH LOVER?\";\n" +
         "        }\n" +
-        "        draw_text_color(room_width / 2, 20, _pk_title, 16777215, 16777215, 16777215, 16777215, 1);\n" +
+        "        else if (pm_pick == 3)\n" +
+        "        {\n" +
+        "            _pk_title = \"REMOVE WHICH MOD?\";\n" +
+        "        }\n" +
+        "        else if (pm_pick == 4)\n" +
+        "        {\n" +
+        "            _pk_title = \"REMOVE \" + string_upper(string_copy(pm_rm_name, 1, 26)) + \"?\";\n" +
+        "        }\n" +
+        "        draw_set_halign(0);\n" +
+        "        draw_text_transformed_color(_pk_x1, 20 * _pk_s, _pk_title, _pk_s, _pk_s, 0, 16777215, 16777215, 16777215, 16777215, 1);\n" +
+        "        draw_set_halign(1);\n" +
         "        for (var _pk_i = 0; _pk_i < _pk_rows; _pk_i++)\n" +
         "        {\n" +
         "            if ((_pk_first + _pk_i) < array_length(pm_pick_list))\n" +
         "            {\n" +
-        "                var _pk_ry = _pk_y0 + (_pk_i * 24);\n" +
-        "                var _pk_rh = point_in_rectangle(mouse_x, mouse_y, _pk_x1, _pk_ry, _pk_x2, _pk_ry + 21);\n" +
+        "                var _pk_ry = _pk_y0 + (_pk_i * 24 * _pk_s);\n" +
+        "                var _pk_rh = point_in_rectangle(mouse_x, mouse_y, _pk_x1, _pk_ry, _pk_x2, _pk_ry + (21 * _pk_s));\n" +
         "                draw_set_alpha(0.3 + (0.3 * _pk_rh));\n" +
-        "                draw_rectangle_color(_pk_x1, _pk_ry, _pk_x2, _pk_ry + 21, 8421504, 8421504, 8421504, 8421504, false);\n" +
+        "                draw_rectangle_color(_pk_x1, _pk_ry, _pk_x2, _pk_ry + (21 * _pk_s), 8421504, 8421504, 8421504, 8421504, false);\n" +
         "                draw_set_alpha(1);\n" +
-        "                draw_text_color(room_width / 2, _pk_ry + 11, string_upper(string_copy(pm_pick_list[_pk_first + _pk_i], 1, 34)), 16777215, 16777215, 16777215, 16777215, 1);\n" +
+        "                draw_text_transformed_color(room_width / 2, _pk_ry + (11 * _pk_s), string_upper(string_copy(pm_pick_list[_pk_first + _pk_i], 1, 34)), _pk_s, _pk_s, 0, 16777215, 16777215, 16777215, 16777215, 1);\n" +
         "            }\n" +
         "        }\n" +
         "        if (pm_pick_page > 0)\n" +
         "        {\n" +
-        "            draw_text_color(_pk_x1 + 45, _pk_by + 11, \"< BACK\", 16777215, 16777215, 16777215, 16777215, 1);\n" +
+        "            draw_text_transformed_color(_pk_x1 + (45 * _pk_s), _pk_by + (11 * _pk_s), \"< BACK\", _pk_s, _pk_s, 0, 16777215, 16777215, 16777215, 16777215, 1);\n" +
         "        }\n" +
-        "        draw_text_color(room_width / 2, _pk_by + 11, \"CANCEL\", 16777215, 16777215, 16777215, 16777215, 1);\n" +
+        "        draw_text_transformed_color(room_width / 2, _pk_by + (11 * _pk_s), \"CANCEL\", _pk_s, _pk_s, 0, 16777215, 16777215, 16777215, 16777215, 1);\n" +
         "        if ((_pk_first + _pk_rows) < array_length(pm_pick_list))\n" +
         "        {\n" +
-        "            draw_text_color(_pk_x2 - 45, _pk_by + 11, \"MORE >\", 16777215, 16777215, 16777215, 16777215, 1);\n" +
+        "            draw_text_transformed_color(_pk_x2 - (45 * _pk_s), _pk_by + (11 * _pk_s), \"MORE >\", _pk_s, _pk_s, 0, 16777215, 16777215, 16777215, 16777215, 1);\n" +
         "        }\n" +
         "    }\n" +
         "    draw_set_halign(_pk_ha);\n" +
@@ -2771,61 +3450,48 @@ static class GamePatcher
         "}\n";
 
     // GML that installs the local file _pm_zip (its name in _pm_fn; _pm_save set): unzip into a
-    // fresh phone_mods/dl_<time>/ folder, register characters, route everything else, and say
-    // what happened in pm_status. Shared by the download event and the inbox check.
+    // fresh phone_mods/dl_<time>/<file name>/ folder, register characters (skipping ones already
+    // installed), route everything else, and say what happened in pm_status. Shared by the
+    // download event and the inbox check. Leaves the counts in _pm_added / _pm_bg / _pm_dlg /
+    // _pm_tex / _pm_voice / _pm_dups. The extra <file name> level gives a zip with its files at
+    // the top level a proper name, the same now and on the next launch.
     private static string PhoneModsInstallBlock(string scan, string afterAdded, string route, string looseJson) =>
-        "var _pm_dest = _pm_save + \"/phone_mods/dl_\" + string_replace_all(string_format(date_current_datetime(), 1, 6), \".\", \"_\");\n" +
-        "if (zip_unzip(_pm_zip, _pm_dest + \"/\") <= 0)\n" +
+        "var _pm_added = 0;\n" +
+        "var _pm_bg = 0;\n" +
+        "var _pm_dlg = 0;\n" +
+        "var _pm_tex = 0;\n" +
+        "var _pm_voice = 0;\n" +
+        "var _pm_dups = 0;\n" +
+        "var _pm_dupdirs = [];\n" +
+        // The time alone is not unique: files shared together are installed a few frames apart,
+        // inside its resolution, and two zips unpacked into one folder get mistaken for each other.
+        "pm_seq++;\n" +
+        "var _pm_dest = _pm_save + \"/phone_mods/dl_\" + string_replace_all(string_format(date_current_datetime(), 1, 6), \".\", \"_\") + \"_\" + string(pm_seq);\n" +
+        "var _pm_base = string_copy(_pm_fn, 1, max(1, string_length(_pm_fn) - 4));\n" +
+        "directory_create(_pm_dest);\n" +
+        "if (zip_unzip(_pm_zip, _pm_dest + \"/\" + _pm_base + \"/\") <= 0)\n" +
         "{\n" +
         "    pm_status = \"That file is not a .zip the game can open.\";\n" +
         Indent(looseJson) +
+        Indent(PhoneModsRemoveTree("_pm_dest")) +
         "}\n" +
         "else\n" +
         "{\n" +
         Indent(scan) +
         Indent(route) +
-        "    var _pm_what = \"\";\n" +
         "    if (_pm_added > 0)\n" +
         "    {\n" +
         Indent(afterAdded, 2) +
-        "        _pm_what += string(_pm_added) + \" character(s) \";\n" +
+        "        for (var _pm_dd = 0; _pm_dd < array_length(_pm_dupdirs); _pm_dd++)\n" +
+        "        {\n" +
+        Indent(PhoneModsRemoveTree("_pm_dupdirs[_pm_dd]"), 3) +
+        "        }\n" +
         "    }\n" +
         "    else\n" +
         "    {\n" +
-        "        directory_destroy(_pm_dest);\n" +
+        Indent(PhoneModsRemoveTree("_pm_dest"), 2) +
         "    }\n" +
-        "    if (_pm_bg > 0)\n" +
-        "    {\n" +
-        "        _pm_what += string(_pm_bg) + \" background(s) \";\n" +
-        "    }\n" +
-        "    if (_pm_dlg > 0)\n" +
-        "    {\n" +
-        "        _pm_what += string(_pm_dlg) + \" dialogue file(s) \";\n" +
-        "    }\n" +
-        "    if (_pm_tex > 0)\n" +
-        "    {\n" +
-        "        _pm_what += string(_pm_tex) + \" texture pack(s) \";\n" +
-        "    }\n" +
-        "    if (_pm_voice > 0)\n" +
-        "    {\n" +
-        "        _pm_what += string(_pm_voice) + \" voice pack(s) \";\n" +
-        "    }\n" +
-        "    if (_pm_what == \"\")\n" +
-        "    {\n" +
-        "        pm_status = \"Nothing the game can use was found in that file.\";\n" +
-        "    }\n" +
-        "    else\n" +
-        "    {\n" +
-        "        pm_status = \"Added \" + _pm_what;\n" +
-        "        if ((_pm_bg + _pm_dlg + _pm_tex) > 0)\n" +
-        "        {\n" +
-        "            pm_status += \"- restart the game to use backgrounds, dialogue and textures.\";\n" +
-        "        }\n" +
-        "        if (_pm_voice > 0)\n" +
-        "        {\n" +
-        "            pm_status += \"- tap VOICES to give a voice to a lover.\";\n" +
-        "        }\n" +
-        "    }\n" +
+        Indent(PhoneModsStatusText("_pm_added", "_pm_bg", "_pm_dlg", "_pm_tex", "_pm_voice", "_pm_dups")) +
         "}\n";
 
     // Prepended to the Draw event: about once a second on the title screen, install one file the
@@ -2846,6 +3512,37 @@ static class GamePatcher
         "            var _pm_fn = _pm_in;\n" +
         Indent(PhoneModsInstallBlock(scan, afterAdded, route, looseJson), 3) +
         "            file_delete(_pm_zip);\n" +
+        // Several files shared together arrive as several inbox files. Take the next one on the
+        // very next check instead of a second later, and finish with one total for the lot.
+        "            pm_bt_n++;\n" +
+        "            pm_bt_a += _pm_added;\n" +
+        "            pm_bt_bg += _pm_bg;\n" +
+        "            pm_bt_dlg += _pm_dlg;\n" +
+        "            pm_bt_tex += _pm_tex;\n" +
+        "            pm_bt_voice += _pm_voice;\n" +
+        "            pm_bt_dups += _pm_dups;\n" +
+        "            var _pm_more = file_find_first(_pm_save + \"/phone_inbox/*\", 0);\n" +
+        "            file_find_close();\n" +
+        "            if (_pm_more != \"\" && _pm_more != _pm_in)\n" +
+        "            {\n" +
+        "                pm_inbox_tick = 40;\n" +
+        "                pm_status = \"Adding mods... \" + string(pm_bt_n) + \" done\";\n" +
+        "            }\n" +
+        "            else\n" +
+        "            {\n" +
+        "                if (pm_bt_n > 1)\n" +
+        "                {\n" +
+        Indent(PhoneModsStatusText("pm_bt_a", "pm_bt_bg", "pm_bt_dlg", "pm_bt_tex", "pm_bt_voice", "pm_bt_dups"), 5) +
+        "                    pm_status = \"From \" + string(pm_bt_n) + \" files: \" + pm_status;\n" +
+        "                }\n" +
+        "                pm_bt_n = 0;\n" +
+        "                pm_bt_a = 0;\n" +
+        "                pm_bt_bg = 0;\n" +
+        "                pm_bt_dlg = 0;\n" +
+        "                pm_bt_tex = 0;\n" +
+        "                pm_bt_voice = 0;\n" +
+        "                pm_bt_dups = 0;\n" +
+        "            }\n" +
         "        }\n" +
         "    }\n" +
         "}\n";
@@ -2898,6 +3595,7 @@ static class GamePatcher
         "        directory_create(_pm_save + \"/dialogue_packs\");\n" +
         "    }\n" +
         "    file_copy(_pm_zip, _pm_save + \"/dialogue_packs/\" + _pm_fn);\n" +
+        "    _pm_dlg++;\n" +
         "    pm_status = \"Added dialogue pack \" + _pm_fn + \" - restart the game to use it.\";\n" +
         "}\n";
 
@@ -2939,7 +3637,7 @@ static class GamePatcher
         }
         string drawText = new DecompileContext(globalContext, drawCode, settings).DecompileToString();
 
-        if (createText.Contains(AndroidCustomDiscoveryMarker))
+        if (FindDiscoveryAnchor(createText) is not null)
         {
             if (!drawText.Contains(PhoneModsDrawEventAnchor))
             {
@@ -3020,19 +3718,26 @@ static class GamePatcher
                         ModRoomRoute("_pm_root + \"/seed\"", "\"starter\""))
                     + target.CreateText[target.InsertAt..];
                 // A flat zip (files at the top level) takes its name from the file name, minus ".zip".
-                string scan = PhoneModsScan("_pm_dest", ModRoomIsPack, register);
-                string route = ModRoomRoute("_pm_dest", "string_copy(_pm_fn, 1, max(1, string_length(_pm_fn) - 4))");
-                drawText = PhoneModsPickerTop + PhoneModsDrawTopGeneric + PhoneModsInboxTop(scan, "", route, ModRoomLooseJson)
-                    + target.DrawText + PhoneModsDrawBottomGeneric + PhoneModsPickerBottom;
+                string scan = PhoneModsScan("_pm_dest", ModRoomIsPack, PhoneModsSkipDuplicate(ModRoomDupPick, register));
+                string route = ModRoomRoute("_pm_dest", "_pm_base");
+                drawText = PhoneModsPickerTop(true, PhoneModsRemoveList(ModRoomIsPack, true)) + PhoneModsDrawTopGeneric
+                    + PhoneModsInboxTop(scan, "", route, ModRoomLooseJson)
+                    + target.DrawText + PhoneModsDrawBottomGeneric + PhoneModsPickerBottom(true);
                 httpCode = PhoneModsHttpEventCode(scan, "", route, ModRoomLooseJson);
             }
             else
             {
-                createText = target.CreateText.Replace(AndroidCustomDiscoveryMarker,
-                    AndroidCustomDiscoveryMarker + PhoneModsCreateBlock(PhoneModsScan("_pm_root", VanillaIsPack, VanillaRegister), VanillaAfterScan, ""));
-                string scan = PhoneModsScan("_pm_dest", VanillaIsPack, VanillaRegister);
-                drawText = PhoneModsInboxTop(scan, "custom_sprite_loaded = true;\n", PhoneModsNoRoute, "")
-                    + target.DrawText.Replace(PhoneModsDrawEventAnchor, PhoneModsDrawEventAnchor + PhoneModsDrawBlock);
+                string vanillaAnchor = FindDiscoveryAnchor(target.CreateText)!;
+                string vanillaRegister = LoadCustomTakesOneArg(target.CreateText)
+                    ? VanillaRegister.Replace("func_load_custom(_pm_dir, -1);", "func_load_custom(_pm_dir);")
+                    : VanillaRegister;
+                createText = target.CreateText.Replace(vanillaAnchor,
+                    vanillaAnchor + PhoneModsCreateBlock(PhoneModsScan("_pm_root", VanillaIsPack, vanillaRegister), VanillaAfterScan, ""));
+                string scan = PhoneModsScan("_pm_dest", VanillaIsPack, PhoneModsSkipDuplicate(VanillaDupPick, vanillaRegister));
+                drawText = PhoneModsPickerTop(false, PhoneModsRemoveList(VanillaIsPack, false))
+                    + PhoneModsInboxTop(scan, "custom_sprite_loaded = true;\n", PhoneModsNoRoute, "")
+                    + target.DrawText.Replace(PhoneModsDrawEventAnchor, PhoneModsDrawEventAnchor + PhoneModsDrawBlock)
+                    + PhoneModsPickerBottom(false);
                 httpCode = PhoneModsHttpEventCode(scan, "custom_sprite_loaded = true;\n", PhoneModsNoRoute, "");
             }
 

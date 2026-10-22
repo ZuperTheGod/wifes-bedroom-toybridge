@@ -1735,6 +1735,12 @@ class MainWindow(QMainWindow):
         # character-discovery code, which --touch-controls then rewrites, so phone mods must come
         # first. A pass a particular game can't take is skipped rather than failing the build.
         extra_passes: list[tuple[str, str]] = []
+        # Characters bundled from the mods folder are only found on a phone with this pass on the
+        # base game (vanilla 1.4 / 1.5). ModRoom-style mods get the same from --touch-controls and
+        # can't take this one, so skipping it there is expected and not reported.
+        quiet_passes = {"--android-custom-discovery"}
+        if mods_path:
+            extra_passes.append(("--android-custom-discovery", "bundled custom characters"))
         if self.android_phone_mods_check.isChecked():
             extra_passes.append(("--phone-mods", "the ADD MOD / VOICES buttons"))
         if self.android_touch_check.isChecked():
@@ -1766,6 +1772,8 @@ class MainWindow(QMainWindow):
                 QApplication.processEvents()
                 if self._run_apkpatcher([str(self._apkpatcher_exe), str(current), flag, "--out", str(work_files[index]), "--yes"]):
                     current = work_files[index]
+                elif flag in quiet_passes:
+                    self.android_log(f"Skipped {label} - not needed for this game.")
                 else:
                     skipped.append(label)
                     self.android_log(f"Skipped {label} - this game can't take that patch (see the lines above).")

@@ -31,6 +31,8 @@ Full walkthrough of every tab (Play / Mods / Android) is in [`LAUNCHER.txt`](LAU
   - **Mods on the phone** - ADD MOD and VOICES buttons on the title screen install a mod `.zip`
     from an `https://` link (characters, and on ModRoom-style mods also backgrounds, dialogue,
     texture packs and voice packs) with no PC.
+    A mod file can also be opened with or shared to the game (several at once), a mod that is
+    already installed is skipped, and REMOVE MOD takes one off again.
   - **Built-in toy support** - the game connects to Intiface Central itself, so the phone needs
     no Termux and no separate bridge.
   - Works with the official game and ModRoom-style mods (ModRoom, DeepRoom).

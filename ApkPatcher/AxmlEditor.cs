@@ -181,14 +181,24 @@ public static class AxmlEditor
         activityAttributes.Add((Attr("exported", AttrExported), NoIndex, TypeBoolean, 0xFFFFFFFF));
 
         Start("activity", activityAttributes.ToArray());
-        foreach (string action in new[] { "android.intent.action.VIEW", "android.intent.action.SEND" })
+        // Exact zip/json types for "Open with". Sharing is looser on purpose: when several files
+        // are shared together the sending app labels them with one common type, and file managers
+        // differ - Android's own Files app says application/zip, others say application/* or */*,
+        // and the game was then simply missing from the share sheet (reported by a player). The
+        // activity itself skips anything that isn't a .zip or .json.
+        foreach (var (action, extraMimes) in new[]
+        {
+            ("android.intent.action.VIEW", Array.Empty<string>()),
+            ("android.intent.action.SEND", new[] { "application/*" }),
+            ("android.intent.action.SEND_MULTIPLE", new[] { "application/*", "*/*" }),
+        })
         {
             Start("intent-filter");
             Start("action", StringAttr(nameAttr, action));
             End("action");
             Start("category", StringAttr(nameAttr, "android.intent.category.DEFAULT"));
             End("category");
-            foreach (string mime in MimeTypes)
+            foreach (string mime in MimeTypes.Concat(extraMimes))
             {
                 Start("data", StringAttr(mimeAttr, mime));
                 End("data");

@@ -165,6 +165,14 @@ try
         {
             Console.WriteLine($"Replacing it with: {replaceDataPath}");
             File.Copy(replaceDataPath, tempDataFile, overwrite: true);
+            // A data file from a newer GameMaker than this APK's runner (Wife's Bedroom 1.5 into
+            // the 1.4.2 APK) can call runner functions the APK doesn't have - see
+            // GamePatcher.FixNewerRuntimeCalls.
+            string? compatNote = GamePatcher.FixNewerRuntimeCalls(tempDataFile);
+            if (compatNote is not null)
+            {
+                Console.WriteLine(compatNote);
+            }
         }
         else
         {

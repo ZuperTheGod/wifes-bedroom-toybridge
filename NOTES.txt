@@ -2260,3 +2260,135 @@ publicly.
   - Exes republished and redeployed to all copies; DeepRoom-3.5.2-Android-full.apk rebuilt.
     Committed locally only - NOT pushed, no new release yet. The setup video
     (DeepRoom 3.5.2\setup-video\) was rebuilt around this flow.
+
+
+  2026-10-12: REMOVE MOD, DUPLICATE CHECK, SEVERAL FILES AT ONCE (all inside --phone-mods)
+  - Asked for by a player: a way to delete added mods (after adding one twice by accident), or
+    not be able to add it twice, and a way to add several mods in one go.
+  - Several at once: PhoneImportActivity now also takes ACTION_SEND_MULTIPLE (AxmlEditor adds
+    the third intent filter); every file is copied to phone_inbox (a second file with the same
+    name gets _2). The title screen installs them a few frames apart and ends with one total
+    ("FROM 3 FILES: ADDED 3 CHARACTER(S)"), counted in the pm_bt_* instance variables.
+  - Duplicate check: PhoneModsSkipDuplicate() wraps the register step of the INSTALL scan only
+    (the startup scan still lists whatever is on disk, so an old double stays visible and can be
+    removed). A pack is a duplicate when a registered pack of the same type has the same data
+    file AND the same md5 for up to three of the new pack's .png files, looked up by name.
+    md5_file works on files inside the APK, so bundled characters are covered too.
+  - REMOVE MOD: new title-screen button (above VOICES / above vanilla's CREDITS) opening the
+    same picker the voices use (pm_pick 3 = choose, 4 = confirm). Lists packs under phone_mods
+    and, on ModRoom-style forks, the folders ADD MOD fills (custom_bedrooms, dialogue_packs,
+    texture_packs, phone_voices). After deleting it calls game_restart(), because every fork
+    keeps different lists of what it loaded; the "Removed ..." line survives in global.pm_note.
+    Voice packs need no restart. Known sockets (tb_sock, hmv_socket, buttplug_socket) are
+    destroyed first so the restart does not leave one bound.
+  - Unzip target is now phone_mods/dl_<time>_<n>/<zip name>/, so a zip with its files at the
+    top level gets the zip's name (it used to be "mod", then "dl_..." after a restart).
+  - The picker scales with the room (_pk_s): vanilla's room is about twice DeepRoom's in pixels
+    and the rows were too small to tap.
+  - Three real bugs found by testing on the emulator, all fixed:
+      1. Files shared together were unzipped a few frames apart, inside the resolution of the
+         time in the folder name, so two zips landed in ONE folder and the second install took
+         the first one's character for a duplicate and deleted it. Hence the _<n> counter, and
+         the check never compares against anything inside the folder being installed.
+      2. The first duplicate rule (data file md5 only) skipped a NEW partner as a copy of a
+         different bundled one: both had an untouched default custom_data.wife. Hence the .png
+         comparison.
+      3. directory_destroy does nothing on Android, even for an empty folder, with or without a
+         trailing slash (logged: directory_exists still true). file_delete on the empty folder
+         does remove it. Without that a removed voice pack or background stayed in the lists as
+         an empty folder. The old "directory_destroy(_pm_dest)" clean-up never worked either.
+  - Verified on the emulator (Medium_Phone_API_36.0), DeepRoom 3.5.2 four-pass build and
+    vanilla 1.4.6 --phone-mods build, with real mod zips:
+      * 3 zips selected in the Files app and shared: wives 8 -> 11, "FROM 3 FILES: ADDED 3".
+      * same lover zip again under another file name: "ALREADY INSTALLED", count unchanged;
+        a zip made from a lover bundled in the APK: also refused.
+      * vanilla: a flat zip, then the same zip downloaded twice ("... (1).zip"): refused.
+      * removed a partner, a lover, a background, a dialogue .json and a voice pack; counts
+        dropped, the entry left the list, same process id after the restart, no crash, and
+        "click to begin" still works afterwards. Cold relaunch keeps the result.
+      * upgrade: v1.5.0's DeepRoom APK and the new one installed over each other keep the
+        added mods, and the new REMOVE MOD lists a mod the old build installed.
+    One unexplained thing: once, an `adb install -r` of a different test build left the app
+    with no added mods. Two deliberate repeats of the upgrade did not reproduce it.
+  - NOT verified: a real phone; Discord's own share sheet with several files; texture pack
+    removal (same code path as backgrounds, no test pack); more than one page of entries in
+    the remove list; iOS.
+  - Testing note that replaces the one above: adb CAN hand a file to the game without the
+    Files UI - push it under /sdcard/Download, run `content call --uri content://media
+    --method scan_volume --arg external_primary`, look its _id up with `content query --uri
+    content://media/external/file`, then `am start -n <pkg>/wbmods.PhoneImportActivity -a
+    android.intent.action.VIEW -d content://media/external/file/<id> -t application/zip
+    --grant-read-uri-permission`. Several files at once still needs the Files UI.
+  - Exes republished and redeployed to all copies, installer recompiled, new user build
+    DeepRoom-3.5.2-Android-full-v2.apk. NOT committed, NOT pushed, no release yet.
+
+  2026-10-22: PLAYER FEEDBACK ROUND - typing sizes on a phone, HYPER sizes, mixed multi-share
+  - Typing sizes: ModRoom-style SIZES pages have a number box per slider (keyboard_string,
+    committed by keyboard_check_pressed(13)). On a phone nothing happened when tapped ("tried
+    keyboard support but no luck"). --touch-controls now opens get_string_async with the current
+    value when a box (customize_selected_input) or colour box (active_color_input) becomes
+    selected; OK writes keyboard_string and holds Enter (keyboard_key_press/release, 2 frames) so
+    the game's own commit code runs; Cancel deselects. The handler is appended to an existing
+    Async Dialog event (--phone-mods has one) or the event is created. keyboard_virtual_show was
+    tried first: it works (✓ commits) but in landscape it covers the whole menu.
+  - HYPER: a switch drawn under the wife sliders (empty rows) multiplies slider_lover_max and
+    slider_wife_max by 2.5 when on; remembered in <save>/hyper_sizes.on. The blockage pill's
+    min(ball_size + 0.02, 2) became min(..., max(2, ball_size)) so it never shrinks bigger balls.
+    Nothing else in the code clamps sizes for drawing (3 gameplay-only clamps checked).
+  - Multi-share: Android's Files app labels a MIXED selection (zip + json + png) "*/*", which the
+    old filters didn't list, so the game was missing from the share sheet - likely what the
+    player hit. SEND now also accepts application/*, SEND_MULTIPLE application/* and */*; the
+    activity skips names with another extension and says so.
+  - Verified on the emulator: DeepRoom full build and ModRoom 3.2 (step1.apk + phone-mods +
+    touch). Box -> pop-up shows "1.08", typed 5 -> girth 5 (past the cap with HYPER off), Cancel
+    keeps values, the next box opens again; HYPER ON -> girth/length/balls 4.25 (ModRoom: balls
+    3.75), drawn without a crash; HYPER stays on after a restart; zip+json+png shared together:
+    intent typ=*/*, game listed, "2 mods received, 1 other file(s) skipped".
+  - Not verified: a real phone, Samsung's file manager, colour boxes, iOS.
+  - Not done: WB 1.5 (released 2026-10-16 with Steam/Workshop) - a player says the launcher no
+    longer patches it. Needs the 1.5 files to look at.
+  - Exes redeployed, installer recompiled, user build DeepRoom-3.5.2-Android-full-v3.apk.
+
+  2026-10-22 (later): WIFE'S BEDROOM 1.5
+  - A player: the launcher "didn't work" after the 1.5 update (released 2026-10-16, Steam +
+    Workshop). Tested against 1.5's PC build (v1.5.0.7, GameMaker 2024.14, bytecode 17).
+  - PC: the toy patch applies, the patched game runs, and its UDP telemetry matches 1.4's (same
+    6 fields and ranges; 40 s each: 1052 packets vs 711, thrust 0..1 while inserted). HMV patch
+    applies. --custom-alts no longer matches (not used by the launcher). End-to-end with the
+    bridge could not be shown: the bridge speaks Buttplug v4 and fake_intiface.py only v3.
+  - Android: 1.5's data.win in the 1.4.2 APK (runner 2024.13) fails at load: "Error on load /
+    Unable to find function @@array_get@@" - in 1.5's own unpatched code (pill menu, 3 uses in
+    Draw). New GamePatcher.FixNewerRuntimeCalls, run by ApkPatcher on --replace-data: recompiles
+    code calling @@array_get@@ with array_get() and drops the unused function entry. Then 1.5
+    boots on the emulator, the pill menu opens and a pill takes effect.
+  - 1.5 moved vanilla discovery into func_get_custom_characters() (called again by a new
+    refresh button, which only adds to the lists) and func_load_custom now takes one argument.
+    --android-custom-discovery and --phone-mods find a second anchor (AndroidCustomDiscoveryMarkerV15,
+    after the startup call) and use the one-argument call. Verified on the emulator: bundled
+    partner listed, ADD MOD via Open with added a lover, same zip again "ALREADY INSTALLED",
+    the lover picked from 1.5's CUSTOM menu renders in the bedroom. 1.4 still patches.
+  - Launcher Android tab now adds --android-custom-discovery when a mods folder is bundled
+    (skipped silently for ModRoom-style, which use --touch-controls). Driven headless with the
+    real MainWindow: 1.4.2 APK + 1.5 data + mods folder -> all passes, APK boots on the emulator.
+  - Not verified: the Steam build itself (this copy has no steam_api DLL), real phone, a real
+    toy on 1.5. Unknown what exactly failed for the player on PC - most likely the update
+    replaced the patched data.win (re-patch), or a Steam install under Program Files that
+    GamePatcher can't write to without admin rights.
+
+  2026-10-22 (evening): NUMBER BOXES - KEYPAD + FILTER
+  - Player report: "entering symbols breaks it" - asked for keypad only, decimals allowed.
+    Reproduced on the emulator with the pop-up version: typing 2%2A -> "ERROR in action number 1
+    / Draw Event / unable to convert string "2%2A1.19" to number" (the game's own real() call).
+  - Replaced the get_string_async pop-up (and its Async Dialog handler) with
+    keyboard_virtual_show(kbv_type_numbers): Gboard's number pad (digits , . - space). Every
+    frame while a box is selected keyboard_string is cut down to digits + one point (comma ->
+    point, leading point gets a 0); the value is drawn in a bar across the top (TouchKeyboardBottom,
+    end of Draw) because the keypad covers the box; Back (keyboard_virtual_status false after
+    having been true) commits via the same 2-frame Enter as before; an emptied box gets the value
+    it had back instead of the game's "" -> 0.
+  - Verified on the emulator (DeepRoom): keypad shows with the VALUE bar; "2-,5.5a" -> 2.55
+    (adb types % as Shift+5, which the number pad reads as 5 - a test-tool artefact); Back kept
+    "3"; emptied box kept 5; letters dropped on the final v4 APK, which also upgraded over v3
+    (same release key - note test builds from bin\Release are signed with a different key).
+    No error and same process throughout. ModRoom 3.2 patches. Colour boxes not tested.
+  - User build: DeepRoom-3.5.2-Android-full-v4.apk. Exes redeployed, installer recompiled.

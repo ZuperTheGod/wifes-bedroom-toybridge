@@ -169,8 +169,10 @@ Central on mobile, etc.) - this tab only covers the one-time patch step.
      ModRoom-style mods actually use.
   5. "Add mods on the phone itself" puts ADD MOD and VOICES buttons on the
      game's title screen: the player pastes the https:// link of a mod .zip
-     (a Discord file link works) and the game installs it with no PC. On
-     by default. See ANDROID.txt for what it can install.
+     (a Discord file link works) and the game installs it with no PC. Mod
+     files can also be opened with / shared to the game, several at once,
+     and REMOVE MOD on the same screen deletes one again. On by default.
+     See ANDROID.txt for what it can install.
   6. "Built-in toy support" makes the game connect to Intiface Central by
      itself, so the phone needs no Termux and no separate bridge. On by
      default. If you use a machine, set a max ping time in Intiface Central

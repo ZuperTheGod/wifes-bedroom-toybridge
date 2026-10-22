@@ -291,6 +291,20 @@ Then on the phone you only need the game and Intiface Central:
 Status: tested on an Android emulator against a stand-in server only. Not yet
 confirmed against the real Intiface Central or with a real toy moving.
 
+WIFE'S BEDROOM 1.5 ON ANDROID
+--------------------------------------------------------------------------
+1.5 (October 2026, the Steam release) is built with a newer GameMaker than
+the newest Android APK (1.4.2). Put into that APK as it is, it stops at
+start-up ("Unable to find function @@array_get@@"). When you swap in a data
+file (--replace-data, or "Replace game content" in the launcher), ApkPatcher
+now rewrites the few places that use that function, and 1.5 runs.
+
+So for 1.5 on a phone: take the 1.4.2 Android APK and replace its data with
+1.5's data.win (from the PC game folder). All the phone features work on
+1.5: bundled custom characters, ADD MOD / REMOVE MOD / Open with, and the
+built-in toy client. Steam features (Workshop, achievements) are not
+available on a phone.
+
 ADDING MODS ON THE PHONE ITSELF (--phone-mods)
 --------------------------------------------------------------------------
 Two ways to add a mod, both with no PC:
@@ -322,5 +336,45 @@ those. Voice packs (zips with moan_fast / moan_slow folders) are kept too:
 tap VOICES on the title screen, pick the voice, then pick which custom lover
 gets it, and choose that lover again in the game to hear it. Lovers only.
 
-Limits: .zip only (no .rar/.7z), https:// links only, and the button is on the
-title screen.
+Several mods at once: in the Files app (or any app that can select several
+files), press and hold one .zip, tap the others, then Share and choose Wife's
+Bedroom. The game adds them one after another and shows one total at the end
+("FROM 3 FILES: ADDED 3 CHARACTER(S)"). A single .zip can also hold several
+mods.
+
+Duplicates: a character the game already has is skipped instead of being
+listed twice ("ALREADY INSTALLED"). It is recognised by its contents, so it
+does not matter what the .zip or its folder was renamed to, and it also works
+for characters that were built into the APK. A different version of the same
+character is not a duplicate - add it, then remove the old one.
+
+Removing: tap REMOVE MOD on the title screen, pick the mod, then YES - REMOVE
+IT. Characters, backgrounds, dialogue files, texture packs and stored voice
+packs are listed. The game restarts itself afterwards (a second or two) so the
+mod is really gone. Only mods added on the phone can be removed; ones built
+into the APK cannot. Removing a voice pack does not take the voice away from a
+lover that was already given it.
+
+TYPING SIZES AND HYPER SIZES (ModRoom-style mods, part of --touch-controls)
+--------------------------------------------------------------------------
+In the options menu's SIZES page every slider has a number box beside it.
+On a phone, tapping the box opens the number keypad, and the value being
+typed is shown in a bar at the top of the screen (the keypad covers the
+box). Press the tick to set it; closing the keypad with Back also sets it.
+Only digits and one decimal point are accepted (a comma counts as the
+point) - anything else is ignored, because the game itself stops with an
+error on anything that isn't a number. A box left empty keeps its old
+value. A typed number can go past the slider's limit.
+
+The same page has a HYPER switch (under the wife's two sliders). With HYPER
+ON every lover and wife slider goes to 2.5x its normal maximum (DeepRoom:
+girth, length and balls up to 4.25). It is off by default and the game
+remembers it. Values past the old limits are drawn by the game's normal
+scaling, so very large sizes run off the edge of the screen.
+
+Sharing several files: the game now also appears when the files shared
+together are of mixed kinds (a .zip with a .json, say), which Android labels
+as "any type". Anything that is not a .zip or .json is skipped with a note.
+
+Limits: .zip only (no .rar/.7z), https:// links only, and the buttons are on
+the title screen.
