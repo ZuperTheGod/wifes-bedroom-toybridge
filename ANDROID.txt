@@ -293,17 +293,18 @@ confirmed against the real Intiface Central or with a real toy moving.
 
 WIFE'S BEDROOM 1.5 ON ANDROID
 --------------------------------------------------------------------------
-1.5 (October 2026, the Steam release) is built with a newer GameMaker than
-the newest Android APK (1.4.2). Put into that APK as it is, it stops at
-start-up ("Unable to find function @@array_get@@"). When you swap in a data
-file (--replace-data, or "Replace game content" in the launcher), ApkPatcher
-now rewrites the few places that use that function, and 1.5 runs.
+Use the official 1.5 Android APK from the game's developer: pick it as the
+source APK in the launcher's Android tab and leave "Replace game content"
+unticked. Bundled custom characters, ADD MOD / REMOVE MOD / Open with and
+the built-in toy client all work on it (tested: the official APK, shown as
+"Vanilla v1.5.7", with a bundled partner and a lover added on the phone).
+Steam features (Workshop, achievements) are not available on a phone.
 
-So for 1.5 on a phone: take the 1.4.2 Android APK and replace its data with
-1.5's data.win (from the PC game folder). All the phone features work on
-1.5: bundled custom characters, ADD MOD / REMOVE MOD / Open with, and the
-built-in toy client. Steam features (Workshop, achievements) are not
-available on a phone.
+Only if you don't have the official 1.5 APK: the 1.4.2 Android APK with
+"Replace game content" set to the PC game's 1.5 data.win also works. 1.5 is
+built with a newer GameMaker than that APK, which made it stop at start-up
+("Unable to find function @@array_get@@"); ApkPatcher now rewrites the few
+places that use that function whenever it swaps in a data file.
 
 ADDING MODS ON THE PHONE ITSELF (--phone-mods)
 --------------------------------------------------------------------------

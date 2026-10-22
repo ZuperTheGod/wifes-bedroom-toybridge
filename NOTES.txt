@@ -2392,3 +2392,13 @@ publicly.
     (same release key - note test builds from bin\Release are signed with a different key).
     No error and same process throughout. ModRoom 3.2 patches. Colour boxes not tested.
   - User build: DeepRoom-3.5.2-Android-full-v4.apk. Exes redeployed, installer recompiled.
+
+  2026-10-22 (night): OFFICIAL 1.5 ANDROID APK
+  - The developer has an official 1.5 Android APK (title shows "Vanilla v1.5.7", GameMaker
+    2024.14 runner, arm64-v8a only; its game.droid differs from the PC data.win). All vanilla
+    passes apply to it unchanged with v1.5.1's tools (the 1.5 anchors cover it). Driven through
+    the real launcher MainWindow headless (official APK, no data swap, mods folder): base,
+    bundled characters, phone mods and toy-direct applied, touch-controls skipped as for any
+    vanilla game. On the emulator: boots, bundled partner listed, lover added via Open with and
+    played from the CUSTOM menu. ANDROID.txt now recommends the official APK; the 1.4.2 +
+    1.5 data.win route stays as the fallback.
