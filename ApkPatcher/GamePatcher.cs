@@ -98,6 +98,17 @@ static class GamePatcher
     /// into an APK shell built for the other can produce exactly this kind of runtime struct-
     /// construction crash, since struct/hash bytecode encoding isn't guaranteed stable across
     /// GameMaker versions.</summary>
+    // The GameMaker version a data file was built with (from its GEN8 header), e.g. (2024, 13).
+    public static (uint Major, uint Minor) GetGameMakerVersion(string dataWinPath)
+    {
+        UndertaleData data;
+        using (var stream = new FileStream(dataWinPath, FileMode.Open, FileAccess.Read))
+        {
+            data = UndertaleIO.Read(stream);
+        }
+        return (data.GeneralInfo?.Major ?? 0, data.GeneralInfo?.Minor ?? 0);
+    }
+
     public static string DumpVersionInfo(string dataWinPath)
     {
         try
@@ -659,7 +670,7 @@ static class GamePatcher
     // avoids adding a brand-new sprite/object/room-instance asset via UndertaleModLib, which every
     // patch so far in this project has avoided (only ever adding code to EXISTING objects/events).
     // Two near-identical blocks (left/right) rather than a loop, matching this file's existing
-    // style elsewhere (e.g. RightClickMarker1/2) of just writing exactly-two-of-something twice.
+    // style elsewhere (e.g. the old RightClickMarker1/2) of just writing exactly-two-of-something twice.
     private const string HmvSpeakerDrawAppend =
         "\n// HMV speaker icons - drawn last so they sit on top of everything else this frame" +
         "\nvar _hmv_s = hmv_speaker_size;" +
@@ -902,16 +913,135 @@ static class GamePatcher
     // "make everything touch friendly" claim.
 
     private const string TouchCreateMarker = "thrust_time = 0;";
+
+    // Folder listing inside the APK. On Android, GameMaker can open a bundled file by name but
+    // cannot list a bundled folder (file_find_first finds nothing, directory_exists says false).
+    // Character folders got their own rewrite (RewriteScanLoop + _manifest.txt); DeepRoom 4.0 then
+    // added more listings - voice packs (custom_sounds), the radio (custom_music), each pack's
+    // moan/orgasm folders. Instead of matching each loop, every file_find_first/next/close and
+    // directory_exists in the Create event (where all of them live) goes through these helpers:
+    // when the folder has a _manifest.txt (written by ApkPatcher --include-mods), the listing
+    // comes from it; otherwise they call the real function, so the phone's own writable folders
+    // and the PC behave exactly as before. "*" and "*.ext" masks are honoured; folders and files
+    // are listed alike, which matches how the game's loops already check each name themselves.
+    // Also: the game builds paths as working_directory + "/custom_sounds/...", and on Android
+    // working_directory already ends in "/" ("assets/"), so those paths hold "//" and every
+    // file_exists/audio_create_stream on them fails there (DeepRoom 4.0: 22 voice packs listed,
+    // none of their sounds loaded). In this event those become tc_wd + "/..." (working_directory
+    // without its trailing slash - unchanged on PC). setting_data.sav is left alone: changing
+    // its path would move where the game keeps its settings and reset them after an update.
+    private const string FolderListHelpers =
+        "function tc_norm_path(_p)\n" +
+        "{\n" +
+        "    _p = string(_p);\n" +
+        "    while (string_pos(\"//\", _p) > 0)\n" +
+        "    {\n" +
+        "        _p = string_replace_all(_p, \"//\", \"/\");\n" +
+        "    }\n" +
+        "    return _p;\n" +
+        "}\n" +
+        "\n" +
+        "function tc_dir_exists(_p)\n" +
+        "{\n" +
+        "    _p = tc_norm_path(_p);\n" +
+        "    if (string_char_at(_p, string_length(_p)) == \"/\")\n" +
+        "    {\n" +
+        "        _p = string_copy(_p, 1, string_length(_p) - 1);\n" +
+        "    }\n" +
+        "    return directory_exists(_p) || file_exists(_p + \"/_manifest.txt\");\n" +
+        "}\n" +
+        "\n" +
+        "function tc_ff_first(_mask, _attr)\n" +
+        "{\n" +
+        "    tc_ff_items = -1;\n" +
+        "    var _m = tc_norm_path(_mask);\n" +
+        "    var _cut = string_last_pos(\"/\", _m);\n" +
+        "    var _mf = (_cut > 0) ? (string_copy(_m, 1, _cut) + \"_manifest.txt\") : \"_manifest.txt\";\n" +
+        "    if (!file_exists(_mf))\n" +
+        "    {\n" +
+        "        return file_find_first(_mask, _attr);\n" +
+        "    }\n" +
+        "    var _pat = string_lower(string_delete(_m, 1, _cut));\n" +
+        "    var _suf = (string_char_at(_pat, 1) == \"*\") ? string_delete(_pat, 1, 1) : \"\";\n" +
+        "    tc_ff_items = [];\n" +
+        "    var _f = file_text_open_read(_mf);\n" +
+        "    while (!file_text_eof(_f))\n" +
+        "    {\n" +
+        "        var _ln = string_replace_all(string_replace_all(file_text_readln(_f), \"\\r\", \"\"), \"\\n\", \"\");\n" +
+        "        var _lo = string_lower(_ln);\n" +
+        "        var _ok = _ln != \"\" && _lo != \"_manifest.txt\";\n" +
+        "        if (_ok && string_char_at(_pat, 1) == \"*\")\n" +
+        "        {\n" +
+        "            _ok = _suf == \"\" || (string_length(_lo) >= string_length(_suf) && string_copy(_lo, (string_length(_lo) - string_length(_suf)) + 1, string_length(_suf)) == _suf);\n" +
+        "        }\n" +
+        "        else if (_ok)\n" +
+        "        {\n" +
+        "            _ok = _lo == _pat;\n" +
+        "        }\n" +
+        "        if (_ok)\n" +
+        "        {\n" +
+        "            array_push(tc_ff_items, _ln);\n" +
+        "        }\n" +
+        "    }\n" +
+        "    file_text_close(_f);\n" +
+        "    tc_ff_pos = 0;\n" +
+        "    return tc_ff_next();\n" +
+        "}\n" +
+        "\n" +
+        "function tc_ff_next()\n" +
+        "{\n" +
+        "    if (!is_array(tc_ff_items))\n" +
+        "    {\n" +
+        "        return file_find_next();\n" +
+        "    }\n" +
+        "    if (tc_ff_pos >= array_length(tc_ff_items))\n" +
+        "    {\n" +
+        "        return \"\";\n" +
+        "    }\n" +
+        "    tc_ff_pos++;\n" +
+        "    return tc_ff_items[tc_ff_pos - 1];\n" +
+        "}\n" +
+        "\n" +
+        "function tc_ff_close()\n" +
+        "{\n" +
+        "    if (!is_array(tc_ff_items))\n" +
+        "    {\n" +
+        "        file_find_close();\n" +
+        "    }\n" +
+        "    tc_ff_items = -1;\n" +
+        "}\n" +
+        "\n" +
+        "tc_ff_items = -1;\n" +
+        "tc_ff_pos = 0;\n" +
+        "tc_wd = working_directory;\n" +
+        "if (string_char_at(tc_wd, string_length(tc_wd)) == \"/\")\n" +
+        "{\n" +
+        "    tc_wd = string_copy(tc_wd, 1, string_length(tc_wd) - 1);\n" +
+        "}\n";
+
+    // Routes the Create event's folder listing through FolderListHelpers (see there).
+    private static string WithFolderListHelpers(string createText)
+    {
+        if (!createText.Contains("file_find_first(") || createText.Contains("function tc_ff_first(")) return createText;
+        createText = System.Text.RegularExpressions.Regex.Replace(createText,
+            @"working_directory \+ ""/(?!setting_data\.sav)", "tc_wd + \"/");
+        createText = createText
+            .Replace("file_find_first(", "tc_ff_first(")
+            .Replace("file_find_next()", "tc_ff_next()")
+            .Replace("file_find_close()", "tc_ff_close()")
+            .Replace("directory_exists(", "tc_dir_exists(");
+        return FolderListHelpers + createText;
+    }
     private const string TouchCreatePatch =
         "\ntouch_hold_start = 0;" +
         "\ntouch_long_press_fired = false;" +
         "\ntouch_long_press_synthetic = false;";
 
-    private const string RightClickMarker1 = "if (mouse_check_button_pressed(2) && cursor_id == 9)";
-    private const string RightClickReplacement1 = "if ((mouse_check_button_pressed(2) || touch_long_press_synthetic) && cursor_id == 9)";
-
-    private const string RightClickMarker2 = "if (mouse_check_button_pressed(2))";
-    private const string RightClickReplacement2 = "if (mouse_check_button_pressed(2) || touch_long_press_synthetic)";
+    // Every right-click check in oFutaMatingPress's Step event (portrait switch, outfit toggle) also
+    // fires on a long-press. Matched as a bare call rather than as whole lines: DeepRoom 4.0 added
+    // "&& manual_mode == 0" to one of those lines and the old exact-line match skipped long-press.
+    private const string RightClickMarker = "mouse_check_button_pressed(2)";
+    private const string RightClickReplacement = "(mouse_check_button_pressed(2) || touch_long_press_synthetic)";
 
     // Prepended to Step_0 (not inserted after a marker) so the long-press tracking runs before
     // anything else that checks touch_long_press_synthetic this frame.
@@ -1447,7 +1577,7 @@ static class GamePatcher
             // completely restructured right-click check).
             bool hasScroll = createText.Contains(MenuScrollOriginal) || createText.Contains(MenuScrollOriginalFlipped);
             string stepText = new DecompileContext(globalContext, stepCode, settings).DecompileToString();
-            bool hasRightClick = stepText.Contains(RightClickMarker1) && stepText.Contains(RightClickMarker2);
+            bool hasRightClick = stepText.Contains(RightClickMarker);
 
             if (!hasScroll && !hasRightClick)
             {
@@ -1472,7 +1602,10 @@ static class GamePatcher
     // exact number (keyboard_string, committed with Enter), which is also the only way past a
     // slider's cap. On a phone tapping it does nothing visible: GameMaker never opens the on-screen
     // keyboard by itself. Reported by a player as "tried keyboard support but no luck".
-    // A tap on a box (or a colour box) now opens the phone's NUMBER keypad. Two things learned
+    // A tap on a box (or a colour box) now opens the phone's PHONE keypad (not the "numbers" one:
+    // the engine gives that one Android's whole-number input type, so Android itself throws away
+    // the keypad's "." and "," before the game sees them - found 2026-11-05 by tapping the real
+    // keys; the earlier test typed with adb key events, which skip that filter). Two things learned
     // the hard way: the game turns the text into a number with real(), which stops the game with
     // "unable to convert string to number" for anything else (a player typed a symbol: reproduced
     // with "2%2A"), so while a box is selected keyboard_string is cut down to digits and one
@@ -1561,7 +1694,7 @@ static class GamePatcher
         "        {\n" +
         "            tc_edit_for = _tc_sel;\n" +
         "            tc_orig = keyboard_string;\n" +
-        "            keyboard_virtual_show(kbv_type_numbers, kbv_returnkey_done, kbv_autocapitalize_none, false);\n" +
+        "            keyboard_virtual_show(kbv_type_phone, kbv_returnkey_done, kbv_autocapitalize_none, false);\n" +
         "            tc_kbv = true;\n" +
         "            tc_kbv_seen = false;\n" +
         "        }\n" +
@@ -1704,7 +1837,7 @@ static class GamePatcher
             bool scrollPatched = createText.Contains(MenuScrollOriginal) || createText.Contains(MenuScrollOriginalFlipped);
 
             string stepText = new DecompileContext(globalContext, stepCode, settings).DecompileToString();
-            bool rightClickPatched = stepText.Contains(RightClickMarker1) && stepText.Contains(RightClickMarker2);
+            bool rightClickPatched = stepText.Contains(RightClickMarker);
 
             if (!scrollPatched && !rightClickPatched)
             {
@@ -1783,13 +1916,15 @@ static class GamePatcher
             // the expected pattern was actually found - see scrollPatched/rightClickPatched above.
             if (rightClickPatched)
             {
-                stepText = stepText.Replace(RightClickMarker1, RightClickReplacement1);
-                stepText = stepText.Replace(RightClickMarker2, RightClickReplacement2);
+                stepText = stepText.Replace(RightClickMarker, RightClickReplacement);
             }
             if (pillMenuPatched) stepText = stepText.Replace(PillMenuScrollUpdateMarker, PillMenuScrollUpdateReplacement);
             if (rightClickPatched) stepText = TouchStepPrepend + stepText;
 
             var importGroup = new CodeImportGroup(data) { AutoCreateAssets = false };
+            bool folderListPatched = !createText.Contains("function tc_ff_first(") && createText.Contains("file_find_first(");
+            createText = WithFolderListHelpers(createText);
+
             importGroup.QueueReplace(CreateEventName, createText);
             importGroup.QueueReplace("gml_Object_oFutaMatingPress_Step_0", stepText);
             if (touchDrawCode is not null) importGroup.QueueReplace(DrawEventName, drawText!);
@@ -1812,8 +1947,9 @@ static class GamePatcher
             string pillNote = pillMenuPatched
                 ? " Pill menu is now laid out as two columns of 7 (no scrolling needed, nothing can run off-screen)."
                 : " Pill menu code didn't match what was expected (or this game has no pill menu), so that part was skipped.";
-            string extrasNote = (keyboardPatched ? " Tapping a number box now opens the number keypad (digits and one decimal point only)." : "")
-                + (hyperPatched ? " Added a HYPER switch to the SIZES menu (sliders reach 2.5x)." : "");
+            string extrasNote = (keyboardPatched ? " Tapping a number box now opens a keypad (digits and one decimal point only)." : "")
+                + (hyperPatched ? " Added a HYPER switch to the SIZES menu (sliders reach 2.5x)." : "")
+                + (folderListPatched ? " Bundled folders (voice packs, music) can now be listed on Android." : "");
             return new PatchOutcome(PatchResult.Patched,
                 $"Touch controls patched successfully!{scrollNote}{rightClickNote}{scanNote}{pillNote}{extrasNote} A backup of the original was saved as:\n{backupPath}");
         }

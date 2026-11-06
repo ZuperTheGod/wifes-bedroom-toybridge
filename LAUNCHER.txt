@@ -152,6 +152,9 @@ ANDROID.txt for the full picture of what this fits into (Termux, Intiface
 Central on mobile, etc.) - this tab only covers the one-time patch step.
 
   1. "Source APK" - browse to your own copy of the game's Android .apk.
+     For plain Wife's Bedroom 1.5 use the official 1.5 APK; for a mod
+     built on 1.4 (DeepRoom, ModRoom) use the 1.4.2 APK. If you pick the
+     wrong one, Patch APK stops and tells you which one to use.
   2. Optionally check "Replace game content with a different data file" and
      browse to a PC mod's data.win (e.g. ModRoom's) if you want that mod's
      content running on Android instead of the vanilla game.

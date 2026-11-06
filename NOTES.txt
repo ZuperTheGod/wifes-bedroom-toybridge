@@ -2402,3 +2402,56 @@ publicly.
     vanilla game. On the emulator: boots, bundled partner listed, lover added via Open with and
     played from the CUSTOM menu. ANDROID.txt now recommends the official APK; the 1.4.2 +
     1.5 data.win route stays as the fallback.
+
+  2026-11-05: DEEPROOM 4.0 - WRONG BASE APK, PHONE KEYPAD, LONG-PRESS
+  - User report: "the new modroom 4v does not work" (DeepRoom 4.0, GameMaker 2024.13). Their
+    build used the official 1.5 APK as the source (as ANDROID.txt then recommended) with
+    DeepRoom 4.0's data.win swapped in. On the emulator that APK starts, then dies about two
+    seconds in with a native SIGSEGV in the GL thread; the same data in the 1.4.2 APK runs.
+    The 1.5 APK's engine is 2024.14 and doesn't run 2024.13 data.
+  - ApkPatcher --replace-data now refuses that pair before building: the newer engine is
+    recognised by the text "@@array_get@@" inside lib/*/libyoyo.so (only 2024.14 has it), the
+    data's version is read from its GEN8 header (GamePatcher.GetGameMakerVersion). Prints two
+    "Problem:" lines and exits 1; the launcher shows those lines in its failure dialog instead
+    of "see the status log". Verified with the CLI (DR4 + 1.5 APK refused; DR4 + 1.4.2 builds;
+    WB 1.5 data + 1.4.2 still builds) and by driving the real launcher window headless.
+  - Number boxes: tapping the REAL keys of the number keypad showed that "." and "," never
+    arrive (also on DeepRoom 3.5.2 - the 10-22 test typed with adb key events, which skip it).
+    The engine (RunnerKeyboardController, read with dexdump) gives kbv_type_numbers Android's
+    TYPE_CLASS_NUMBER with no decimal flag, so Android's own digit filter drops them. Switched
+    to kbv_type_phone (TYPE_CLASS_PHONE, inputType 0x80093 seen in dumpsys), whose pad has a
+    "." key; our filter still keeps only digits + one point. Emulator, DR4, real key taps:
+    2 . . 5 0 -> "2.50", ticked, girth box shows 2.50 with HYPER on.
+  - Long-press: DeepRoom 4.0 added "&& manual_mode == 0" to the portrait right-click line, so the
+    exact-line match skipped long-press. Now every mouse_check_button_pressed(2) in
+    oFutaMatingPress Step_0 gets "|| touch_long_press_synthetic" (DR4, DR 3.5.2 and ModRoom 3.2
+    each have exactly the same two). Emulator, DR4: holding the portrait switched it from the
+    lover to the wife. DR 3.5.2 and ModRoom 3.2 still patch (6 references each, as before);
+    vanilla unchanged. DR4's other right-click uses (Draw event: radial panel, menus) are not
+    hooked - a long hold in the scene is gameplay, so it isn't turned into a right-click there.
+  - DR4's pill menu is already in columns with no scrolling, so the pill-menu fix correctly
+    skips it. HYPER + typed sizes work on DR4. 117 lovers / 67 wives bundled, title buttons,
+    toy status, bedroom all fine on the emulator.
+  - VOICE PACKS (DR4's new custom_sounds/futa/<pack>/moan_slow|moan_fast|orgasm, 22 packs, 591
+    files) and the radio (custom_music) did not work on Android: the game lists those folders
+    with file_find_first/directory_exists, which see nothing inside an APK, and builds the paths
+    as working_directory + "/..." = "assets//..." which file_exists/audio_create_stream reject.
+    Fix, general rather than per-loop:
+    * ApkPatcher --include-mods also bundles custom_sounds, custom_music and dialogue (the
+      last only with --replace-data: a mod's dialogue goes with its data; DR4's livestream.json
+      differs from the 1.4.2 APK's). custom_sounds/custom_music are stored lowercase with
+      underscores like the character folders, with a _manifest.txt in EVERY folder.
+    * --touch-controls routes every file_find_first/next/close and directory_exists in
+      oFutaMatingPress Create_0 through helpers (GamePatcher FolderListHelpers) that read that
+      _manifest.txt when there is one and otherwise call the real function, and rewrites
+      working_directory + "/..." to tc_wd + "/..." (no trailing slash). setting_data.sav paths
+      are left as they were, so saved settings stay where they are.
+    Emulator, DR4, with an on-screen readout (a throwaway build): packs=22, picking
+    "clenched_teeth" loads 5 slow / 4 fast / 3 orgasm sounds (= the folder), first one 6.25 s
+    long, audio_play_sound -> playing=1 and an active OpenSL ES player in dumpsys audio. Pack
+    names show lowercase with underscores (how they have to be stored in the APK).
+    DeepRoom 3.5.2 rebuilt the same way: boots, 2 lovers + 8 wives, bedroom runs; ModRoom 3.2
+    patches.
+  - Emulator storage filled up during this (INSTALL_FAILED_INSUFFICIENT_STORAGE on install -r of
+    a 113 MB APK): uninstall + pm trim-caches 4G, then install.
+  - Not verified: a real phone, a real toy on DR4, hearing the voice packs (only measured).

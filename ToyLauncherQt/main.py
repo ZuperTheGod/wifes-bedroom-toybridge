@@ -1691,6 +1691,8 @@ class MainWindow(QMainWindow):
         try:
             result = subprocess.run(args, capture_output=True, text=True, timeout=600)
             output = (result.stdout or "") + (result.stderr or "")
+            problems = [l[len("Problem:"):].strip() for l in output.splitlines() if l.startswith("Problem:")]
+            self._last_apk_problem = "\n\n".join(p[:1].upper() + p[1:] for p in problems)
             for line in output.splitlines():
                 if line.strip():
                     self.android_log(line)
@@ -1762,8 +1764,9 @@ class MainWindow(QMainWindow):
         QApplication.processEvents()
         skipped: list[str] = []
         try:
+            self._last_apk_problem = ""
             if not self._run_apkpatcher(base_args):
-                QMessageBox.critical(self, "Patch APK", "Patching failed - see the status log for details.")
+                QMessageBox.critical(self, "Patch APK", self._last_apk_problem or "Patching failed - see the status log for details.")
                 return
 
             current = work_files[0]
