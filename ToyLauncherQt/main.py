@@ -1740,13 +1740,17 @@ class MainWindow(QMainWindow):
         # Characters bundled from the mods folder are only found on a phone with this pass on the
         # base game (vanilla 1.4 / 1.5). ModRoom-style mods get the same from --touch-controls and
         # can't take this one, so skipping it there is expected and not reported.
-        quiet_passes = {"--android-custom-discovery"}
+        # --folder-access lets the game find bundled folders on a phone (voice packs, music,
+        # backgrounds...); a game that never reads folders by path doesn't need it.
+        quiet_passes = {"--android-custom-discovery", "--folder-access"}
         if mods_path:
             extra_passes.append(("--android-custom-discovery", "bundled custom characters"))
         if self.android_phone_mods_check.isChecked():
             extra_passes.append(("--phone-mods", "the ADD MOD / VOICES buttons"))
         if self.android_touch_check.isChecked():
             extra_passes.append(("--touch-controls", "touch controls / custom character fix"))
+        if mods_path or replace_path:
+            extra_passes.append(("--folder-access", "bundled folders (voice packs, music, backgrounds)"))
         if self.android_toy_direct_check.isChecked():
             extra_passes.append(("--toy-direct", "built-in toy support"))
 

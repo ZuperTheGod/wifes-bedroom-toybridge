@@ -302,17 +302,28 @@ engine of its own GameMaker version:
     the mod's data.win. On the 1.5 APK these crash about two seconds after
     the game starts.
 
-You don't have to know which GameMaker a mod was made with: if the pair
-doesn't match, Patch APK stops before building anything and says which APK
-to pick instead (checked from the files themselves, so it also covers mod
-versions that come out later). A mod made with 1.5's newer GameMaker works
-on the 1.4.2 APK as well (see the end of the next section).
+You don't have to know which GameMaker a mod was made with. Patch APK
+reads the version of the mod's data and of the APK's engine from the files
+themselves (it prints both in the status box), so this also works for mod
+and game versions that come out later:
+  - mod data OLDER than the engine: stops before building anything and says
+    which APK to pick instead (this combination crashes on start);
+  - mod data NEWER than the engine: fixes the engine functions it knows how
+    to (1.5 data runs on the 1.4.2 APK this way), and stops with the names of
+    any it can't, instead of building an APK that won't start.
 
-With "Bundle mod folders" pointed at the mod's folder, its voice packs
-(custom_sounds - DeepRoom 4.0's CUSTOM SOUNDS button), radio music
-(custom_music) and its own dialogue files come along too. On the phone the
-voice pack names show in lowercase with underscores; that is how they have
-to be stored inside an APK.
+BUNDLED FOLDERS
+With "Bundle mod folders" pointed at the mod's folder, everything the game
+reads from its folder comes along: characters, backgrounds, dialogue packs,
+texture packs, voice packs (custom_sounds - DeepRoom 4.0's CUSTOM SOUNDS
+button), radio music (custom_music), the mod's own dialogue files, and any
+other folder the mod's game code mentions by name - so a folder a new mod
+version adds is picked up without an update to this tool. A "bundled
+folders" pass then lets the game find them on the phone (GameMaker can't
+list folders inside an APK by itself); things added later with ADD MOD /
+Open with are found alongside them. On the phone, names from bundled folders
+show in lowercase with underscores; that is how they have to be stored
+inside an APK.
 
 WIFE'S BEDROOM 1.5 ON ANDROID
 --------------------------------------------------------------------------

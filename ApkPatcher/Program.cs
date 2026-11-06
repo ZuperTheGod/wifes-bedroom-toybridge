@@ -55,6 +55,7 @@ bool customAltsMode = false;
 bool androidCustomDiscoveryMode = false;
 bool phoneModsMode = false;
 bool toyDirectMode = false;
+bool folderAccessMode = false;
 string? phoneSeedPath = null;
 
 foreach (string arg in args)
@@ -67,6 +68,7 @@ foreach (string arg in args)
     else if (arg == "--android-custom-discovery") androidCustomDiscoveryMode = true;
     else if (arg == "--phone-mods") phoneModsMode = true;
     else if (arg == "--toy-direct") toyDirectMode = true;
+    else if (arg == "--folder-access") folderAccessMode = true;
     else if (arg == "--phone-seed") { /* consumed below */ }
     else if (arg == "--out") { /* consumed below */ }
     else if (arg == "--replace-data") { /* consumed below */ }
@@ -166,24 +168,50 @@ try
         Console.WriteLine($"Found game data file inside APK: {dataEntryName}");
         if (replaceDataPath is not null)
         {
-            // A data file only runs on a GameMaker engine of its own generation. Wife's Bedroom 1.5's
-            // Android APK carries a newer engine (2024.14) than 1.4.2's (2024.13); game data made for
-            // 2024.13 - DeepRoom 4.0, ModRoom 3.2, every mod built on 1.4 - crashes it two seconds
-            // after start (native SIGSEGV in the GL thread, seen on the emulator 2026-11-05 with
-            // DeepRoom 4.0, while the same data runs on the 1.4.2 APK). The engine has no version
-            // string, but only the newer one contains the internal function @@array_get@@ (the one
-            // FixNewerRuntimeCalls works around in the other direction), so that tells them apart.
-            bool newerEngine = archive.Entries
+            // A mod's game data has to suit the GameMaker engine inside the APK. Checked from the
+            // files, so it keeps working for mod and game versions that don't exist yet:
+            //  - The engine's version: the APK's own game data was built together with its engine,
+            //    so its version is the engine's (official 1.5 APK: 2024.14, 1.4.2 APK: 2024.13).
+            //    An APK this tool already patched may carry swapped-in data, so the engine itself
+            //    corrects it: only 2024.14 and later contain "@@array_get@@".
+            //  - OLDER data in a newer engine crashes about two seconds after start (native SIGSEGV
+            //    in the GL thread: DeepRoom 4.0, 2024.13, in the 1.5 APK, seen 2026-11-05) and
+            //    nothing can be rewritten to fix that, so it is refused.
+            //  - NEWER data in an older engine fails on engine functions the older one lacks.
+            //    Known ones are rewritten (FixNewerRuntimeCalls); anything still missing afterwards
+            //    is refused by name instead of building an APK that stops at start-up.
+            byte[]? engine = null;
+            var engineEntry = archive.Entries
                 .Where(e => e.FullName.StartsWith("lib/", StringComparison.Ordinal) && e.Name == "libyoyo.so")
-                .Any(e => EntryContains(e, "@@array_get@@"));
+                .OrderByDescending(e => e.FullName.Contains("arm64", StringComparison.Ordinal))
+                .FirstOrDefault();
+            if (engineEntry is not null)
+            {
+                using var engineStream = engineEntry.Open();
+                using var engineMemory = new MemoryStream();
+                engineStream.CopyTo(engineMemory);
+                engine = engineMemory.ToArray();
+            }
+            string apkDataFile = tempDataFile + ".apkdata";
+            dataEntry.ExtractToFile(apkDataFile, overwrite: true);
+            var (apkMajor, apkMinor) = GamePatcher.GetGameMakerVersion(apkDataFile);
+            File.Delete(apkDataFile);
             var (dataMajor, dataMinor) = GamePatcher.GetGameMakerVersion(replaceDataPath);
-            bool newerData = dataMajor > 2024 || (dataMajor == 2024 && dataMinor >= 14);
-            if (newerEngine && !newerData)
+            long engineVersion = apkMajor * 1000L + apkMinor;
+            if (engine is not null)
+            {
+                bool hasArrayGet = engine.AsSpan().IndexOf("@@array_get@@"u8) >= 0;
+                if (hasArrayGet) engineVersion = Math.Max(engineVersion, 2024014);
+                else engineVersion = Math.Min(engineVersion, 2024013);
+            }
+            long dataVersion = dataMajor * 1000L + dataMinor;
+            string engineName = $"{engineVersion / 1000}.{engineVersion % 1000}";
+            Console.WriteLine($"GameMaker versions: the APK's engine {engineName}, this mod's game data {dataMajor}.{dataMinor}.");
+            if (dataVersion < engineVersion)
             {
                 Console.WriteLine($"Problem: this mod's game data was made with GameMaker {dataMajor}.{dataMinor}, but the APK you picked " +
-                    "has the newer engine from Wife's Bedroom 1.5. The game would crash as soon as it starts.");
-                Console.WriteLine("Problem: pick the Wife's Bedroom 1.4.2 Android APK as the source APK for this mod instead " +
-                    "(it matches mods like DeepRoom and ModRoom). Nothing was built.");
+                    $"has a newer engine ({engineName}). The game would crash as soon as it starts.");
+                Console.WriteLine($"Problem: pick {ApkFor(dataVersion)} as the source APK for this mod instead. Nothing was built.");
                 return 1;
             }
             Console.WriteLine($"Replacing it with: {replaceDataPath}");
@@ -195,6 +223,18 @@ try
             if (compatNote is not null)
             {
                 Console.WriteLine(compatNote);
+            }
+            if (engine is not null && dataVersion > engineVersion)
+            {
+                var missing = GamePatcher.FindMissingEngineFunctions(tempDataFile, engine);
+                if (missing.Count > 0)
+                {
+                    Console.WriteLine($"Problem: this mod's game data was made with a newer GameMaker ({dataMajor}.{dataMinor}) than the " +
+                        $"APK's engine ({engineName}) and uses engine functions that engine doesn't have: " +
+                        string.Join(", ", missing.Take(8)) + (missing.Count > 8 ? $" and {missing.Count - 8} more" : "") + ".");
+                    Console.WriteLine($"Problem: pick {ApkFor(dataVersion)} as the source APK for this mod instead. Nothing was built.");
+                    return 1;
+                }
             }
         }
         else
@@ -209,6 +249,7 @@ try
         : androidCustomDiscoveryMode ? GamePatcher.CheckAndroidCustomDiscoveryStatus(tempDataFile)
         : phoneModsMode ? GamePatcher.CheckPhoneModsStatus(tempDataFile)
         : toyDirectMode ? GamePatcher.CheckToyDirectStatus(tempDataFile)
+        : folderAccessMode ? GamePatcher.CheckFolderAccessStatus(tempDataFile)
         : GamePatcher.CheckStatus(tempDataFile);
     Console.WriteLine($"Compatible: {status.Compatible}   Already patched: {status.AlreadyPatched}   ({status.Detail})");
     if (!status.Compatible)
@@ -220,7 +261,7 @@ try
     {
         if (!skipConfirm)
         {
-            string what = hmvMode ? "HMV mode" : touchControlsMode ? "touch controls" : customAltsMode ? "custom alts" : androidCustomDiscoveryMode ? "Android custom discovery" : phoneModsMode ? "phone mods folder" : toyDirectMode ? "built-in toy client" : "toy telemetry";
+            string what = hmvMode ? "HMV mode" : touchControlsMode ? "touch controls" : customAltsMode ? "custom alts" : androidCustomDiscoveryMode ? "Android custom discovery" : phoneModsMode ? "phone mods folder" : toyDirectMode ? "built-in toy client" : folderAccessMode ? "folder access" : "toy telemetry";
             string action = replaceDataPath is not null
                 ? $"This will build a new APK using the data file you gave it, with {what} added, re-signed, saved at:\n  {outPath}"
                 : $"This will create a patched ({what}), re-signed copy at:\n  {outPath}";
@@ -239,6 +280,7 @@ try
             : androidCustomDiscoveryMode ? GamePatcher.PatchAndroidCustomDiscovery(tempDataFile)
             : phoneModsMode ? GamePatcher.PatchPhoneMods(tempDataFile)
             : toyDirectMode ? GamePatcher.PatchToyDirect(tempDataFile)
+            : folderAccessMode ? GamePatcher.PatchFolderAccess(tempDataFile)
             : GamePatcher.Patch(tempDataFile);
         Console.WriteLine($"{outcome.Result}: {outcome.Message}");
         if (outcome.Result != GamePatcher.PatchResult.Patched)
@@ -350,14 +392,28 @@ try
             // already-known name does. --touch-controls patches the game to read this manifest
             // instead of enumerating, when present - see GamePatcher.cs.
             string[] manifestFolderNames = ["custom_wives", "custom_futas", "texture_packs", "custom"];
-            // These get a _manifest.txt in EVERY folder, listing what's in it (files and folders),
-            // read by the folder-listing helpers that --touch-controls adds (GamePatcher
-            // FolderListHelpers). Names are normalized the same way as above.
-            string[] deepManifestFolderNames = ["custom_sounds", "custom_music"];
             static string NormalizeAssetPath(string s) => s.ToLowerInvariant().Replace(' ', '_');
 
+            // Besides the folders known by name, any other folder in the mod's directory that the
+            // game's own code mentions as a path is bundled too - so a folder a new mod version
+            // adds comes along without this tool knowing its name. One the APK already has (like
+            // "language") is only replaced when the mod's own data is swapped in, since then the
+            // two belong together.
+            var otherFolders = Directory.GetDirectories(includeModsPath)
+                .Select(Path.GetFileName).OfType<string>()
+                .Where(n => !modFolderNames.Contains(n, StringComparer.OrdinalIgnoreCase) && !n.StartsWith('.') && !n.StartsWith('_'))
+                .ToList();
+            var foundFolders = GamePatcher.FindReferencedFolders(tempDataFile, otherFolders)
+                .Where(n => replaceDataPath is not null
+                    || !archive.Entries.Any(e => e.FullName.StartsWith($"assets/{n}/", StringComparison.OrdinalIgnoreCase)))
+                .ToList();
+            if (foundFolders.Count > 0)
+            {
+                Console.WriteLine($"The game also reads these folders, so they are bundled too: {string.Join(", ", foundFolders)}.");
+            }
+
             int filesAdded = 0;
-            foreach (string folderName in modFolderNames)
+            foreach (string folderName in modFolderNames.Concat(foundFolders))
             {
                 string sourceDir = Path.Combine(includeModsPath, folderName);
                 if (!Directory.Exists(sourceDir)) continue;
@@ -365,7 +421,9 @@ try
                 // APK's own dialogue matches the game inside it and is left alone.
                 if (folderName == "dialogue" && replaceDataPath is null) continue;
 
-                bool normalizeThisFolder = manifestFolderNames.Contains(folderName) || deepManifestFolderNames.Contains(folderName);
+                // Stored lowercase with underscores (see below) - except "dialogue", whose files
+                // replace the APK's own under their exact names.
+                bool normalizeThisFolder = folderName != "dialogue";
                 foreach (string filePath in Directory.EnumerateFiles(sourceDir, "*", SearchOption.AllDirectories))
                 {
                     string relative = Path.GetRelativePath(sourceDir, filePath).Replace('\\', '/');
@@ -379,7 +437,7 @@ try
                     // file_exists() until the space was removed). Bundling these folders fully
                     // lowercase with spaces replaced by underscores sidesteps both mismatches.
                     if (normalizeThisFolder) relative = NormalizeAssetPath(relative);
-                    string entryName = $"assets/{folderName}/{relative}";
+                    string entryName = $"assets/{(normalizeThisFolder ? NormalizeAssetPath(folderName) : folderName)}/{relative}";
 
                     archive.GetEntry(entryName)?.Delete();
                     var modEntry = archive.CreateEntry(entryName, CompressionLevel.Optimal);
@@ -407,47 +465,35 @@ try
                 // the CUSTOM button - that's a genuine content limitation of these specific mod packs,
                 // not a bug in this tool or in ModRoom's Android support.
 
-                if (deepManifestFolderNames.Contains(folderName))
+                // A _manifest.txt in every folder, listing what is in it, for the --folder-access
+                // helpers (GamePatcher FolderListHelpers). The top of custom_futas/custom_wives/
+                // texture_packs/custom keeps its older form - subfolder names only - because the
+                // character-discovery rewrites read every line there as a character folder.
+                string assetFolder = normalizeThisFolder ? NormalizeAssetPath(folderName) : folderName;
+                int manifests = 0;
+                foreach (string dir in Directory.EnumerateDirectories(sourceDir, "*", SearchOption.AllDirectories).Prepend(sourceDir))
                 {
-                    int manifests = 0;
-                    foreach (string dir in Directory.EnumerateDirectories(sourceDir, "*", SearchOption.AllDirectories).Prepend(sourceDir))
-                    {
-                        string[] children = Directory.EnumerateFileSystemEntries(dir)
-                            .Select(Path.GetFileName)
-                            .Where(n => n is not null && !n.Equals("_manifest.txt", StringComparison.OrdinalIgnoreCase))
-                            .Select(n => NormalizeAssetPath(n!))
-                            .ToArray();
-                        string relativeDir = Path.GetRelativePath(sourceDir, dir).Replace('\\', '/');
-                        string dirEntry = relativeDir == "." ? $"assets/{folderName}" : $"assets/{folderName}/{NormalizeAssetPath(relativeDir)}";
-                        string listEntryName = dirEntry + "/_manifest.txt";
-                        archive.GetEntry(listEntryName)?.Delete();
-                        using var listStream = archive.CreateEntry(listEntryName, CompressionLevel.Optimal).Open();
-                        using var listWriter = new StreamWriter(listStream);
-                        foreach (string name in children) listWriter.Write(name + "\n");
-                        manifests++;
-                    }
-                    Console.WriteLine($"  ...and wrote {manifests} folder list(s) so the game can find these on Android.");
-                }
-                else if (manifestFolderNames.Contains(folderName))
-                {
-                    string[] subfolderNames = Directory.GetDirectories(sourceDir)
+                    bool top = dir == sourceDir;
+                    var entries = top && manifestFolderNames.Contains(folderName)
+                        ? Directory.EnumerateDirectories(dir)
+                        : Directory.EnumerateFileSystemEntries(dir);
+                    string[] children = entries
                         .Select(Path.GetFileName)
-                        .Where(n => n is not null)
-                        .Select(n => NormalizeAssetPath(n!))
+                        .OfType<string>()
+                        .Where(n => !n.Equals("_manifest.txt", StringComparison.OrdinalIgnoreCase))
+                        .Select(n => normalizeThisFolder ? NormalizeAssetPath(n) : n)
                         .ToArray();
-                    if (subfolderNames.Length > 0)
-                    {
-                        string manifestEntryName = $"assets/{folderName}/_manifest.txt";
-                        archive.GetEntry(manifestEntryName)?.Delete();
-                        var manifestEntry = archive.CreateEntry(manifestEntryName, CompressionLevel.Optimal);
-                        using (var manifestStream = manifestEntry.Open())
-                        using (var writer = new StreamWriter(manifestStream))
-                        {
-                            foreach (string name in subfolderNames) writer.Write(name + "\n");
-                        }
-                        Console.WriteLine($"  ...and wrote a manifest listing its {subfolderNames.Length} subfolder(s) (needed for these to be selectable at all on Android).");
-                    }
+                    if (top && children.Length == 0) continue;
+                    string relativeDir = Path.GetRelativePath(sourceDir, dir).Replace('\\', '/');
+                    if (normalizeThisFolder) relativeDir = NormalizeAssetPath(relativeDir);
+                    string listEntryName = top ? $"assets/{assetFolder}/_manifest.txt" : $"assets/{assetFolder}/{relativeDir}/_manifest.txt";
+                    archive.GetEntry(listEntryName)?.Delete();
+                    using var listStream = archive.CreateEntry(listEntryName, CompressionLevel.Optimal).Open();
+                    using var listWriter = new StreamWriter(listStream);
+                    foreach (string name in children) listWriter.Write(name + "\n");
+                    manifests++;
                 }
+                Console.WriteLine($"  ...and wrote {manifests} folder list(s) so the game can find these on Android.");
 
                 Console.WriteLine($"Bundled {folderName}/ into the APK.");
             }
@@ -649,11 +695,10 @@ static (int ExitCode, string Output) RunProcess(string fileName, string argument
     return (process.ExitCode, stdout + stderr);
 }
 
-// True when the zip entry's bytes contain the ASCII text `needle`.
-static bool EntryContains(ZipArchiveEntry entry, string needle)
+// Which Android APK to start from for game data of a given GameMaker version (major*1000+minor).
+static string ApkFor(long dataVersion) => dataVersion switch
 {
-    using var stream = entry.Open();
-    using var memory = new MemoryStream();
-    stream.CopyTo(memory);
-    return memory.ToArray().AsSpan().IndexOf(System.Text.Encoding.ASCII.GetBytes(needle)) >= 0;
-}
+    <= 2024013 => "the Wife's Bedroom 1.4.2 Android APK (it matches mods built on 1.4, like DeepRoom and ModRoom)",
+    2024014 => "the official Wife's Bedroom 1.5 Android APK (it matches mods built on 1.5)",
+    _ => $"the Android APK of the Wife's Bedroom version this mod is built on (one made with GameMaker {dataVersion / 1000}.{dataVersion % 1000})",
+};

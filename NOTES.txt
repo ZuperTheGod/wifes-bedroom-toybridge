@@ -2455,3 +2455,37 @@ publicly.
   - Emulator storage filled up during this (INSTALL_FAILED_INSUFFICIENT_STORAGE on install -r of
     a 113 MB APK): uninstall + pm trim-caches 4G, then install.
   - Not verified: a real phone, a real toy on DR4, hearing the voice packs (only measured).
+
+  2026-11-05 (night): NEW MOD VERSIONS WITHOUT A TOOL UPDATE
+  - User: "it is pointless to only have one apk that is fixed and not the launcher ... what
+    happens when deeproom 5v comes out?" (Everything above was already in the launcher's tools;
+    the DR4 APK was built with the launcher. But several parts still hard-coded DR4's layout.)
+    Made general:
+  - Engine check (ApkPatcher --replace-data): engine version = the APK's own game data version
+    (official 1.5 APK 2024.14, 1.4.2 APK 2024.13), corrected by the engine itself ("@@array_get@@"
+    only in 2024.14+) for APKs this tool already patched. Data older than the engine -> refused.
+    Data newer -> FixNewerRuntimeCalls, then GamePatcher.FindMissingEngineFunctions: every
+    built-in the data calls must appear as a string in libyoyo.so (game-defined functions and
+    extension functions such as Steam's skipped) or it is refused by name. Tested: DR4 into the
+    official 1.5 APK and into the user's earlier 1.5-based build -> refused; DR4 / WB 1.5 data
+    into 1.4.2 -> builds; WB 1.5 data into the 1.5 APK -> builds; WB 1.5 data into a 1.4.2 APK
+    whose libyoyo had "array_length" blanked out -> refused naming array_length.
+  - Folders: --include-mods also bundles any other folder of the mod directory that the game's
+    strings mention as a path ("name/" or "/name") - not one the APK already has unless the data
+    is swapped too. Every bundled folder is stored lowercase/underscored (except "dialogue") with
+    a _manifest.txt in every folder (the top of custom_futas/custom_wives/texture_packs/custom
+    keeps listing subfolders only, for the discovery rewrites). DR4 auto-picked nothing extra
+    (Templates isn't referenced).
+  - New pass --folder-access (launcher pass 5, after touch controls, quiet skip, run when a mods
+    folder or data swap is set): every object event that uses file_find_first/directory_exists
+    or builds working_directory + "/folder..." gets the helpers (declared once per object, in
+    its Create event). Moved out of --touch-controls, so it no longer depends on that pass's
+    markers matching. Helpers now MERGE the bundled list with the real listing (the phone's own
+    storage, where ADD MOD puts backgrounds/dialogue). The path fix only touches folder paths;
+    a top-level file (setting_data.sav etc.) keeps its path, whatever it is called.
+  - Emulator, DR4 (readout build): packs=22, slow=5 after picking a pack, bgs=13 (= its 13
+    folders; title screen "13 custom background(s) loaded"), dlg=1; a background zip opened with
+    the game -> "Added 1 background(s)", after restart bgs=14 with "ZZ Phone BG" from the save
+    area. DR 3.5.2: boots, 2 lovers + 8 wives and now "1 custom background(s) loaded" (bundled
+    backgrounds were never found on Android before). Official 1.5 APK + the 1.4 mods folder:
+    boots, "lovers 46, partners 47, bedrooms 9" = exactly what the folder holds.

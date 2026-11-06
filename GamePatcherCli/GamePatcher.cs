@@ -98,6 +98,40 @@ static class GamePatcher
     /// into an APK shell built for the other can produce exactly this kind of runtime struct-
     /// construction crash, since struct/hash bytecode encoding isn't guaranteed stable across
     /// GameMaker versions.</summary>
+    // Built-in GameMaker functions the data calls that the given engine (libyoyo.so bytes) doesn't
+    // contain. The engine holds every built-in's name as a plain string. Functions the game defines
+    // itself and extension functions (Steam etc. - absent on a phone, and the game copes, e.g.
+    // Wife's Bedroom 1.5's PC data on Android) are not counted.
+    public static List<string> FindMissingEngineFunctions(string dataWinPath, byte[] engine)
+    {
+        UndertaleData data;
+        using (var stream = new FileStream(dataWinPath, FileMode.Open, FileAccess.Read))
+        {
+            data = UndertaleIO.Read(stream);
+        }
+        var engineNames = new HashSet<string>(StringComparer.Ordinal);
+        int start = 0;
+        for (int i = 0; i < engine.Length; i++)
+        {
+            if (engine[i] != 0) continue;
+            if (i - start >= 2) engineNames.Add(System.Text.Encoding.ASCII.GetString(engine, start, i - start));
+            start = i + 1;
+        }
+        var own = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var c in data.Code) if (c?.Name?.Content is string n) own.Add(n);
+        foreach (var sc in data.Scripts) if (sc?.Name?.Content is string n) own.Add(n);
+        foreach (var ext in data.Extensions)
+            foreach (var file in ext?.Files ?? [])
+                foreach (var fn in file?.Functions ?? [])
+                    if (fn?.Name?.Content is string n) own.Add(n);
+        return data.Functions
+            .Select(f => f?.Name?.Content)
+            .OfType<string>()
+            .Where(n => !n.StartsWith("gml_", StringComparison.Ordinal) && !own.Contains(n) && !engineNames.Contains(n))
+            .Distinct()
+            .ToList();
+    }
+
     // The GameMaker version a data file was built with (from its GEN8 header), e.g. (2024, 13).
     public static (uint Major, uint Minor) GetGameMakerVersion(string dataWinPath)
     {
@@ -914,22 +948,26 @@ static class GamePatcher
 
     private const string TouchCreateMarker = "thrust_time = 0;";
 
-    // Folder listing inside the APK. On Android, GameMaker can open a bundled file by name but
-    // cannot list a bundled folder (file_find_first finds nothing, directory_exists says false).
-    // Character folders got their own rewrite (RewriteScanLoop + _manifest.txt); DeepRoom 4.0 then
-    // added more listings - voice packs (custom_sounds), the radio (custom_music), each pack's
-    // moan/orgasm folders. Instead of matching each loop, every file_find_first/next/close and
-    // directory_exists in the Create event (where all of them live) goes through these helpers:
-    // when the folder has a _manifest.txt (written by ApkPatcher --include-mods), the listing
-    // comes from it; otherwise they call the real function, so the phone's own writable folders
-    // and the PC behave exactly as before. "*" and "*.ext" masks are honoured; folders and files
-    // are listed alike, which matches how the game's loops already check each name themselves.
+    // Folder listing inside the APK (--folder-access). On Android, GameMaker can open a bundled
+    // file by name but cannot list a bundled folder (file_find_first finds nothing,
+    // directory_exists says false). Character folders got their own rewrite earlier
+    // (RewriteScanLoop + _manifest.txt); DeepRoom 4.0 then added more listings - voice packs
+    // (custom_sounds), the radio (custom_music), each pack's moan/orgasm folders - and new mod
+    // versions will add others. So instead of matching each loop, every file_find_first/next/
+    // close and directory_exists in every object event goes through these helpers: when the
+    // folder has a _manifest.txt (ApkPatcher --include-mods writes one into every bundled
+    // folder), its names are listed, PLUS whatever the real function finds (the phone's own
+    // storage, where ADD MOD puts backgrounds and dialogue packs); with no _manifest.txt they
+    // are just the real functions, so the PC behaves exactly as before. "*" and "*.ext" masks
+    // are honoured; folders and files are listed alike, which matches how the game's loops
+    // already check each name themselves.
     // Also: the game builds paths as working_directory + "/custom_sounds/...", and on Android
     // working_directory already ends in "/" ("assets/"), so those paths hold "//" and every
     // file_exists/audio_create_stream on them fails there (DeepRoom 4.0: 22 voice packs listed,
-    // none of their sounds loaded). In this event those become tc_wd + "/..." (working_directory
-    // without its trailing slash - unchanged on PC). setting_data.sav is left alone: changing
-    // its path would move where the game keeps its settings and reset them after an update.
+    // none of their sounds loaded). Paths into a FOLDER (working_directory + "/name/..." or
+    // + "/name") become tc_wd + "/..." (working_directory without its trailing slash - unchanged
+    // on PC). A file right at the top (working_directory + "/setting_data.sav") is left alone:
+    // changing that path would move where the game keeps it and reset players' settings.
     private const string FolderListHelpers =
         "function tc_norm_path(_p)\n" +
         "{\n" +
@@ -984,6 +1022,16 @@ static class GamePatcher
         "        }\n" +
         "    }\n" +
         "    file_text_close(_f);\n" +
+        "    var _real = file_find_first(_mask, _attr);\n" +
+        "    while (_real != \"\")\n" +
+        "    {\n" +
+        "        if (!array_contains(tc_ff_items, _real))\n" +
+        "        {\n" +
+        "            array_push(tc_ff_items, _real);\n" +
+        "        }\n" +
+        "        _real = file_find_next();\n" +
+        "    }\n" +
+        "    file_find_close();\n" +
         "    tc_ff_pos = 0;\n" +
         "    return tc_ff_next();\n" +
         "}\n" +
@@ -1019,18 +1067,142 @@ static class GamePatcher
         "    tc_wd = string_copy(tc_wd, 1, string_length(tc_wd) - 1);\n" +
         "}\n";
 
-    // Routes the Create event's folder listing through FolderListHelpers (see there).
-    private static string WithFolderListHelpers(string createText)
+    private static bool NeedsFolderListHelpers(string text) =>
+        text.Contains("file_find_first(") || text.Contains("directory_exists(") ||
+        System.Text.RegularExpressions.Regex.IsMatch(text, @"working_directory \+ ""/[^""./]+(/|"")");
+
+    public static (bool Compatible, bool AlreadyPatched, string Detail) CheckFolderAccessStatus(string dataWinPath)
     {
-        if (!createText.Contains("file_find_first(") || createText.Contains("function tc_ff_first(")) return createText;
+        try
+        {
+            UndertaleData data;
+            using (var stream = new FileStream(dataWinPath, FileMode.Open, FileAccess.Read))
+            {
+                data = UndertaleIO.Read(stream);
+            }
+            var globalContext = new GlobalDecompileContext(data);
+            var settings = data.ToolInfo.DecompilerSettings;
+            bool any = false;
+            foreach (var code in FolderAccessCandidates(data))
+            {
+                string text = new DecompileContext(globalContext, code, settings).DecompileToString();
+                if (text.Contains("function tc_ff_first(")) return (true, true, "Already patched.");
+                any |= NeedsFolderListHelpers(text);
+            }
+            return any ? (true, false, "Compatible, not yet patched.")
+                : (false, false, "This game doesn't list or open folders by path - nothing to do.");
+        }
+        catch (Exception ex)
+        {
+            return (false, false, $"Couldn't check: {ex.Message}");
+        }
+    }
+
+    // Object events only: helpers declared there become that instance's own methods. (A global
+    // script declaring them would clash with any other script declaring the same names.)
+    private static IEnumerable<UndertaleCode> FolderAccessCandidates(UndertaleData data) =>
+        data.Code.Where(c => c is not null && c.ParentEntry is null && c.Name?.Content is string n
+            && n.StartsWith("gml_Object_", StringComparison.Ordinal)
+            && c.Instructions.Any(i => i.ValueFunction?.Name?.Content is "file_find_first" or "directory_exists"
+                || i.ValueVariable?.Name?.Content == "working_directory")).ToList();
+
+    public static PatchOutcome PatchFolderAccess(string dataWinPath)
+    {
+        try
+        {
+            string backupPath = dataWinPath + ".bak";
+            if (!File.Exists(backupPath))
+            {
+                File.Copy(dataWinPath, backupPath);
+            }
+            UndertaleData data;
+            using (var stream = new FileStream(dataWinPath, FileMode.Open, FileAccess.Read))
+            {
+                data = UndertaleIO.Read(stream);
+            }
+            var globalContext = new GlobalDecompileContext(data);
+            var settings = data.ToolInfo.DecompilerSettings;
+            var importGroup = new CodeImportGroup(data) { AutoCreateAssets = false };
+            var changed = new List<string>();
+            // The helpers are declared once per object, in its Create event (which runs before any
+            // other event of it), so a Draw or Step event doesn't re-create them every frame.
+            var candidates = FolderAccessCandidates(data);
+            var codeByName = data.Code.Where(c => c?.Name?.Content is not null).GroupBy(c => c.Name.Content).ToDictionary(g => g.Key, g => g.First());
+            var work = new Dictionary<string, bool>();
+            foreach (var code in candidates)
+            {
+                var m = System.Text.RegularExpressions.Regex.Match(code.Name.Content, @"^gml_Object_(.+)_[A-Za-z]+_\d+$");
+                string create = m.Success ? $"gml_Object_{m.Groups[1].Value}_Create_0" : "";
+                if (code.Name.Content == create || !codeByName.ContainsKey(create))
+                {
+                    work[code.Name.Content] = true;
+                }
+                else
+                {
+                    work.TryAdd(code.Name.Content, false);
+                    work[create] = true;
+                }
+            }
+            foreach (var (name, declare) in work)
+            {
+                var code = codeByName[name];
+                string text = new DecompileContext(globalContext, code, settings).DecompileToString();
+                string patched = WithFolderListHelpers(text, declare);
+                if (patched == text) continue;
+                importGroup.QueueReplace(name, patched);
+                changed.Add(name.Replace("gml_Object_", ""));
+            }
+            if (changed.Count == 0)
+            {
+                return new PatchOutcome(PatchResult.AlreadyPatched, "Nothing to change.");
+            }
+            importGroup.Import();
+            using (var outStream = new FileStream(dataWinPath, FileMode.Create, FileAccess.Write))
+            {
+                UndertaleIO.Write(outStream, data);
+            }
+            return new PatchOutcome(PatchResult.Patched,
+                $"Bundled folders (voice packs, music, backgrounds, dialogue packs...) can now be found on Android ({string.Join(", ", changed)}).");
+        }
+        catch (Exception ex)
+        {
+            return new PatchOutcome(PatchResult.Error, $"Something went wrong while patching folder access: {ex.Message}");
+        }
+    }
+
+    // Names among `folderNames` that the game's own text mentions as a path piece ("name/" or
+    // "/name"), compared case-insensitively - how ApkPatcher finds which of a mod's folders
+    // the game actually reads, including folders new versions add.
+    public static List<string> FindReferencedFolders(string dataWinPath, IEnumerable<string> folderNames)
+    {
+        UndertaleData data;
+        using (var stream = new FileStream(dataWinPath, FileMode.Open, FileAccess.Read))
+        {
+            data = UndertaleIO.Read(stream);
+        }
+        var strings = data.Strings.Where(x => x?.Content is not null).Select(x => x.Content.ToLowerInvariant()).ToList();
+        return folderNames.Where(name =>
+        {
+            string lower = name.ToLowerInvariant();
+            return strings.Any(t => t.Contains(lower + "/", StringComparison.Ordinal) || t.Contains("/" + lower, StringComparison.Ordinal));
+        }).ToList();
+    }
+
+    // Routes an event's folder listing through FolderListHelpers (see there).
+    // `declare`: also declare the helpers here (the object's Create event, or an event of an
+    // object that has none); other events of the object only call them.
+    private static string WithFolderListHelpers(string createText, bool declare = true)
+    {
+        if (createText.Contains("function tc_ff_first(")) return createText;
+        if (!NeedsFolderListHelpers(createText)) return declare ? FolderListHelpers + createText : createText;
         createText = System.Text.RegularExpressions.Regex.Replace(createText,
-            @"working_directory \+ ""/(?!setting_data\.sav)", "tc_wd + \"/");
+            @"working_directory \+ ""/(?=[^""./]+(/|""))", "tc_wd + \"/");
         createText = createText
             .Replace("file_find_first(", "tc_ff_first(")
             .Replace("file_find_next()", "tc_ff_next()")
             .Replace("file_find_close()", "tc_ff_close()")
             .Replace("directory_exists(", "tc_dir_exists(");
-        return FolderListHelpers + createText;
+        return declare ? FolderListHelpers + createText : createText;
     }
     private const string TouchCreatePatch =
         "\ntouch_hold_start = 0;" +
@@ -1922,9 +2094,6 @@ static class GamePatcher
             if (rightClickPatched) stepText = TouchStepPrepend + stepText;
 
             var importGroup = new CodeImportGroup(data) { AutoCreateAssets = false };
-            bool folderListPatched = !createText.Contains("function tc_ff_first(") && createText.Contains("file_find_first(");
-            createText = WithFolderListHelpers(createText);
-
             importGroup.QueueReplace(CreateEventName, createText);
             importGroup.QueueReplace("gml_Object_oFutaMatingPress_Step_0", stepText);
             if (touchDrawCode is not null) importGroup.QueueReplace(DrawEventName, drawText!);
@@ -1948,8 +2117,7 @@ static class GamePatcher
                 ? " Pill menu is now laid out as two columns of 7 (no scrolling needed, nothing can run off-screen)."
                 : " Pill menu code didn't match what was expected (or this game has no pill menu), so that part was skipped.";
             string extrasNote = (keyboardPatched ? " Tapping a number box now opens a keypad (digits and one decimal point only)." : "")
-                + (hyperPatched ? " Added a HYPER switch to the SIZES menu (sliders reach 2.5x)." : "")
-                + (folderListPatched ? " Bundled folders (voice packs, music) can now be listed on Android." : "");
+                + (hyperPatched ? " Added a HYPER switch to the SIZES menu (sliders reach 2.5x)." : "");
             return new PatchOutcome(PatchResult.Patched,
                 $"Touch controls patched successfully!{scrollNote}{rightClickNote}{scanNote}{pillNote}{extrasNote} A backup of the original was saved as:\n{backupPath}");
         }

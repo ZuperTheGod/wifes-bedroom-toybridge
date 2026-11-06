@@ -181,7 +181,7 @@ Central on mobile, etc.) - this tab only covers the one-time patch step.
      default. If you use a machine, set a max ping time in Intiface Central
      (see ANDROID.txt) so it stops if the game is sent to the background.
   7. Click "Patch APK". Each checked option is its own pass, run in the
-     right order automatically (up to four); a pass your particular game
+     right order automatically (up to six); a pass your particular game
      can't take is skipped and named at the end, not treated as a failure.
      This can take anywhere from several seconds to a couple of minutes
      depending on the size of the data file - the Status
