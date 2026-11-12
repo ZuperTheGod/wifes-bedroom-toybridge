@@ -4243,15 +4243,223 @@ static class GamePatcher
         "\ntb_profile_max = [1, 0.3, 0.6, 1, 0.5, 1];" +
         "\ntb_profile = 0;" +
         "\ntb_port = 12345;" +
+        // Toy delay compensation (see ButtplugBridge/LeadPredictor.cs - same logic): the toy is
+        // sent where the stroke will be tb_lead ms from now. Tapped through on the title screen.
+        "\ntb_lead_steps = [0, 50, 100, 150, 200, 250, 300, 400, 500];" +
+        "\ntb_lead = 0;" +
+        "\ntb_pred = 0;" +
+        "\ntb_ld_have = false;" +
         "\nif (tb_enabled)" +
         "\n{" +
         "\n    ini_open(game_save_id + \"toy_direct.ini\");" +
         "\n    tb_profile = clamp(floor(ini_read_real(\"toy\", \"profile\", 0)), 0, 5);" +
         "\n    tb_port = floor(ini_read_real(\"toy\", \"port\", 12345));" +
+        "\n    tb_lead = clamp(floor(ini_read_real(\"toy\", \"lead\", 0)), 0, 1000);" +
         "\n    ini_close();" +
         "\n}";
 
     private const string ToyDirectSceneStamp = "\ntb_scene_at = current_time;";
+
+    // Toy delay compensation, run on each 33 ms sample: feeds thrust / thrust_speed to the same
+    // predictor as ButtplugBridge/LeadPredictor.cs (read that for how it works; this is a line-by-
+    // line port) and leaves the value to send in tb_pred - where the stroke will be tb_lead ms
+    // from now, or the live thrust when compensation is off or there is no steady stroke.
+    private const string ToyDirectLeadSample =
+        "var _tl_t = _tb_now;\n" +
+        "var _tl_x = thrust;\n" +
+        "var _tl_s = thrust_speed;\n" +
+        "if (!tb_ld_have)\n" +
+        "{\n" +
+        "    tb_ld_have = true;\n" +
+        "    tb_ld_dir = 0;\n" +
+        "    tb_ld_ext = _tl_x;\n" +
+        "    tb_ld_has_top = false;\n" +
+        "    tb_ld_has_bot = false;\n" +
+        "    tb_ld_top = 0;\n" +
+        "    tb_ld_bot = 0;\n" +
+        "    tb_ld_t = _tl_t;\n" +
+        "    tb_ld_x = _tl_x;\n" +
+        "    tb_ld_spd = _tl_s;\n" +
+        "    tb_ld_angle = 0;\n" +
+        "    tb_ld_has_cross = false;\n" +
+        "    tb_ld_cross_t = -1000000;\n" +
+        "    tb_ld_cross_a = 0;\n" +
+        "    tb_ld_stroke = 0;\n" +
+        "    tb_ld_steady = false;\n" +
+        "    tb_ld_misses = 0;\n" +
+        "    tb_ld_moved_t = _tl_t;\n" +
+        "    tb_ld_moved_x = _tl_x;\n" +
+        "    tb_ld_cur_a = [];\n" +
+        "    tb_ld_cur_x = [];\n" +
+        "    tb_ld_shape_f = [];\n" +
+        "    tb_ld_shape_x = [];\n" +
+        "}\n" +
+        "else if (_tl_t > tb_ld_t)\n" +
+        "{\n" +
+        "    var _tl_pt = tb_ld_t;\n" +
+        "    var _tl_px = tb_ld_x;\n" +
+        "    var _tl_pa = tb_ld_angle;\n" +
+        "    if (abs(_tl_x - tb_ld_moved_x) > 0.003)\n" +
+        "    {\n" +
+        "        tb_ld_moved_t = _tl_t;\n" +
+        "        tb_ld_moved_x = _tl_x;\n" +
+        "    }\n" +
+        "    tb_ld_angle += ((max(tb_ld_spd, 0) * 60) * (_tl_t - _tl_pt)) / 1000;\n" +
+        "    tb_ld_t = _tl_t;\n" +
+        "    tb_ld_x = _tl_x;\n" +
+        "    tb_ld_spd = _tl_s;\n" +
+        "    if (tb_ld_dir == 0)\n" +
+        "    {\n" +
+        "        if (abs(_tl_x - tb_ld_ext) >= 0.02)\n" +
+        "        {\n" +
+        "            tb_ld_dir = (_tl_x > tb_ld_ext) ? 1 : -1;\n" +
+        "            tb_ld_ext = _tl_x;\n" +
+        "        }\n" +
+        "    }\n" +
+        "    else if ((tb_ld_dir > 0 && _tl_x >= tb_ld_ext) || (tb_ld_dir < 0 && _tl_x <= tb_ld_ext))\n" +
+        "    {\n" +
+        "        tb_ld_ext = _tl_x;\n" +
+        "    }\n" +
+        "    else if (abs(_tl_x - tb_ld_ext) >= 0.02)\n" +
+        "    {\n" +
+        "        if (tb_ld_dir > 0)\n" +
+        "        {\n" +
+        "            tb_ld_top = tb_ld_ext;\n" +
+        "            tb_ld_has_top = true;\n" +
+        "        }\n" +
+        "        else\n" +
+        "        {\n" +
+        "            tb_ld_bot = tb_ld_ext;\n" +
+        "            tb_ld_has_bot = true;\n" +
+        "        }\n" +
+        "        tb_ld_dir = -tb_ld_dir;\n" +
+        "        tb_ld_ext = _tl_x;\n" +
+        "    }\n" +
+        "    if (tb_ld_has_cross && array_length(tb_ld_cur_a) < 400)\n" +
+        "    {\n" +
+        "        array_push(tb_ld_cur_a, tb_ld_angle - tb_ld_cross_a);\n" +
+        "        array_push(tb_ld_cur_x, _tl_x);\n" +
+        "    }\n" +
+        "    if (tb_ld_steady && tb_ld_stroke > 0 && array_length(tb_ld_shape_f) >= 4)\n" +
+        "    {\n" +
+        "        var _tl_since = tb_ld_angle - tb_ld_cross_a;\n" +
+        "        var _tl_q = frac(_tl_since / tb_ld_stroke);\n" +
+        "        var _tl_sv = 0;\n" +
+        "        var _tl_n_sv = array_length(tb_ld_shape_f);\n" +
+        "        if (_tl_q <= tb_ld_shape_f[0])\n" +
+        "        {\n" +
+        "            _tl_sv = tb_ld_shape_x[0];\n" +
+        "        }\n" +
+        "        else if (_tl_q >= tb_ld_shape_f[_tl_n_sv - 1])\n" +
+        "        {\n" +
+        "            _tl_sv = tb_ld_shape_x[_tl_n_sv - 1];\n" +
+        "        }\n" +
+        "        else\n" +
+        "        {\n" +
+        "            var _tl_lo_sv = 0;\n" +
+        "            var _tl_hi_sv = _tl_n_sv - 1;\n" +
+        "            while ((_tl_hi_sv - _tl_lo_sv) > 1)\n" +
+        "            {\n" +
+        "                var _tl_md_sv = (_tl_lo_sv + _tl_hi_sv) div 2;\n" +
+        "                if (tb_ld_shape_f[_tl_md_sv] <= _tl_q)\n" +
+        "                {\n" +
+        "                    _tl_lo_sv = _tl_md_sv;\n" +
+        "                }\n" +
+        "                else\n" +
+        "                {\n" +
+        "                    _tl_hi_sv = _tl_md_sv;\n" +
+        "                }\n" +
+        "            }\n" +
+        "            var _tl_sp_sv = tb_ld_shape_f[_tl_hi_sv] - tb_ld_shape_f[_tl_lo_sv];\n" +
+        "            _tl_sv = (_tl_sp_sv > 0) ? (tb_ld_shape_x[_tl_lo_sv] + (((tb_ld_shape_x[_tl_hi_sv] - tb_ld_shape_x[_tl_lo_sv]) * (_tl_q - tb_ld_shape_f[_tl_lo_sv])) / _tl_sp_sv)) : tb_ld_shape_x[_tl_lo_sv];\n" +
+        "        }\n" +
+        "        var _tl_fit = _tl_since <= (1.15 * tb_ld_stroke) && abs(_tl_x - _tl_sv) <= 0.3;\n" +
+        "        tb_ld_misses = _tl_fit ? 0 : (tb_ld_misses + 1);\n" +
+        "        if (tb_ld_misses >= 2)\n" +
+        "        {\n" +
+        "            tb_ld_steady = false;\n" +
+        "        }\n" +
+        "    }\n" +
+        "    if (tb_ld_has_top && tb_ld_has_bot && (tb_ld_top - tb_ld_bot) >= 0.04)\n" +
+        "    {\n" +
+        "        var _tl_mid = (tb_ld_top + tb_ld_bot) / 2;\n" +
+        "        if (_tl_px < _tl_mid && _tl_x >= _tl_mid)\n" +
+        "        {\n" +
+        "            var _tl_f = (_tl_mid - _tl_px) / (_tl_x - _tl_px);\n" +
+        "            var _tl_ct = _tl_pt + ((_tl_t - _tl_pt) * _tl_f);\n" +
+        "            var _tl_ca = _tl_pa + ((tb_ld_angle - _tl_pa) * _tl_f);\n" +
+        "            if (tb_ld_has_cross)\n" +
+        "            {\n" +
+        "                var _tl_sw = _tl_ca - tb_ld_cross_a;\n" +
+        "                var _tl_r = (_tl_sw > 1) ? (360 / _tl_sw) : 0;\n" +
+        "                tb_ld_steady = _tl_r >= 0.85 && _tl_r <= 1.18;\n" +
+        "                tb_ld_misses = 0;\n" +
+        "                if (tb_ld_steady)\n" +
+        "                {\n" +
+        "                    tb_ld_stroke = _tl_sw;\n" +
+        "                    tb_ld_shape_f = [];\n" +
+        "                    tb_ld_shape_x = [];\n" +
+        "                    for (var _tl_k = 0; _tl_k < array_length(tb_ld_cur_a); _tl_k++)\n" +
+        "                    {\n" +
+        "                        if (tb_ld_cur_a[_tl_k] <= _tl_sw)\n" +
+        "                        {\n" +
+        "                            array_push(tb_ld_shape_f, tb_ld_cur_a[_tl_k] / _tl_sw);\n" +
+        "                            array_push(tb_ld_shape_x, tb_ld_cur_x[_tl_k]);\n" +
+        "                        }\n" +
+        "                    }\n" +
+        "                }\n" +
+        "            }\n" +
+        "            tb_ld_cur_a = [];\n" +
+        "            tb_ld_cur_x = [];\n" +
+        "            tb_ld_cross_t = _tl_ct;\n" +
+        "            tb_ld_cross_a = _tl_ca;\n" +
+        "            tb_ld_has_cross = true;\n" +
+        "        }\n" +
+        "    }\n" +
+        "}\n" +
+        "tb_pred = tb_ld_x;\n" +
+        "if (tb_lead > 0 && tb_ld_steady && tb_ld_stroke > 0 && array_length(tb_ld_shape_f) >= 4)\n" +
+        "{\n" +
+        "    var _tl_dpm = (max(tb_ld_spd, 0) * 60) / 1000;\n" +
+        "    if (_tl_dpm > 0)\n" +
+        "    {\n" +
+        "        var _tl_sms = tb_ld_stroke / _tl_dpm;\n" +
+        "        if (_tl_sms >= 120 && _tl_sms <= 4000 && (_tl_t - tb_ld_cross_t) <= ((1.25 * _tl_sms) + 100) && (_tl_t - tb_ld_moved_t) <= max(150, 0.2 * _tl_sms))\n" +
+        "        {\n" +
+        "            var _tl_pq = frac(((tb_ld_angle - tb_ld_cross_a) + (_tl_dpm * ((_tl_t - tb_ld_t) + tb_lead))) / tb_ld_stroke);\n" +
+        "            var _tl_pv = 0;\n" +
+        "            var _tl_n_pv = array_length(tb_ld_shape_f);\n" +
+        "            if (_tl_pq <= tb_ld_shape_f[0])\n" +
+        "            {\n" +
+        "                _tl_pv = tb_ld_shape_x[0];\n" +
+        "            }\n" +
+        "            else if (_tl_pq >= tb_ld_shape_f[_tl_n_pv - 1])\n" +
+        "            {\n" +
+        "                _tl_pv = tb_ld_shape_x[_tl_n_pv - 1];\n" +
+        "            }\n" +
+        "            else\n" +
+        "            {\n" +
+        "                var _tl_lo_pv = 0;\n" +
+        "                var _tl_hi_pv = _tl_n_pv - 1;\n" +
+        "                while ((_tl_hi_pv - _tl_lo_pv) > 1)\n" +
+        "                {\n" +
+        "                    var _tl_md_pv = (_tl_lo_pv + _tl_hi_pv) div 2;\n" +
+        "                    if (tb_ld_shape_f[_tl_md_pv] <= _tl_pq)\n" +
+        "                    {\n" +
+        "                        _tl_lo_pv = _tl_md_pv;\n" +
+        "                    }\n" +
+        "                    else\n" +
+        "                    {\n" +
+        "                        _tl_hi_pv = _tl_md_pv;\n" +
+        "                    }\n" +
+        "                }\n" +
+        "                var _tl_sp_pv = tb_ld_shape_f[_tl_hi_pv] - tb_ld_shape_f[_tl_lo_pv];\n" +
+        "                _tl_pv = (_tl_sp_pv > 0) ? (tb_ld_shape_x[_tl_lo_pv] + (((tb_ld_shape_x[_tl_hi_pv] - tb_ld_shape_x[_tl_lo_pv]) * (_tl_pq - tb_ld_shape_f[_tl_lo_pv])) / _tl_sp_pv)) : tb_ld_shape_x[_tl_lo_pv];\n" +
+        "            }\n" +
+        "            tb_pred = _tl_pv;\n" +
+        "        }\n" +
+        "    }\n" +
+        "}\n";
 
     // Prepended to the Draw event, so it runs every frame whether or not a scene is active.
     private static readonly string ToyDirectDrawTop =
@@ -4266,6 +4474,22 @@ static class GamePatcher
         "        tb_profile = (tb_profile + 1) % array_length(tb_profile_names);\n" +
         "        ini_open(game_save_id + \"toy_direct.ini\");\n" +
         "        ini_write_real(\"toy\", \"profile\", tb_profile);\n" +
+        "        ini_close();\n" +
+        "        mouse_clear(1);\n" +
+        "    }\n" +
+        "    if (title == true && mouse_check_button_pressed(1) && point_in_rectangle(mouse_x, mouse_y, room_width - 124, 44, room_width, 66))\n" +
+        "    {\n" +
+        "        var _tb_li = 0;\n" +
+        "        for (var _tb_lk = 0; _tb_lk < array_length(tb_lead_steps); _tb_lk++)\n" +
+        "        {\n" +
+        "            if (tb_lead_steps[_tb_lk] == tb_lead)\n" +
+        "            {\n" +
+        "                _tb_li = _tb_lk;\n" +
+        "            }\n" +
+        "        }\n" +
+        "        tb_lead = tb_lead_steps[(_tb_li + 1) % array_length(tb_lead_steps)];\n" +
+        "        ini_open(game_save_id + \"toy_direct.ini\");\n" +
+        "        ini_write_real(\"toy\", \"lead\", tb_lead);\n" +
         "        ini_close();\n" +
         "        mouse_clear(1);\n" +
         "    }\n" +
@@ -4309,6 +4533,7 @@ static class GamePatcher
         "            tb_sent = -1;\n" +
         "            tb_smooth = 0;\n" +
         "            tb_have_last = false;\n" +
+        "            tb_ld_have = false;\n" +
         TbIndent(TbSend("\"[{\\\"StopAllDevices\\\":{\\\"Id\\\":\" + string(tb_msg_id++) + \"}}]\""), 3) +
         "        }\n" +
         "        if ((_tb_now - tb_last_ping) >= tb_ping_every)\n" +
@@ -4322,6 +4547,7 @@ static class GamePatcher
         "        if (!_tb_scene || !insert || title == true || os_is_paused())\n" +
         "        {\n" +
         "            tb_have_last = false;\n" +
+        "            tb_ld_have = false;\n" +
         "            tb_smooth = 0;\n" +
         "            if (tb_running)\n" +
         "            {\n" +
@@ -4335,12 +4561,13 @@ static class GamePatcher
         "            if ((_tb_now - tb_sample_at) >= 33)\n" +
         "            {\n" +
         "                tb_sample_at = _tb_now;\n" +
+        TbIndent(ToyDirectLeadSample, 4) +
         "                var _tb_delta = 0;\n" +
         "                if (tb_have_last)\n" +
         "                {\n" +
-        "                    _tb_delta = abs(thrust - tb_last_thrust);\n" +
+        "                    _tb_delta = abs(tb_pred - tb_last_thrust);\n" +
         "                }\n" +
-        "                tb_last_thrust = thrust;\n" +
+        "                tb_last_thrust = tb_pred;\n" +
         "                tb_have_last = true;\n" +
         "                var _tb_target = clamp(_tb_delta * 7, 0, 1);\n" +
         "                if (orgasm)\n" +
@@ -4361,7 +4588,7 @@ static class GamePatcher
         "            {\n" +
         "                tb_send_at = _tb_now;\n" +
         "                var _tb_changed = !tb_running || abs(_tb_want - tb_sent) >= 0.01;\n" +
-        "                var _tb_pos = _tb_lo + (clamp(thrust, 0, 1) * (_tb_hi - _tb_lo));\n" +
+        "                var _tb_pos = _tb_lo + (clamp(tb_pred, 0, 1) * (_tb_hi - _tb_lo));\n" +
         "                var _tb_dur = round(clamp(((360 / max(thrust_speed, 0.5)) * (1000 / 60)) / 2, 100, 1800));\n" +
         "                var _tb_json = \"\";\n" +
         "                for (var _tb_i = 0; _tb_i < array_length(tb_dev_idx); _tb_i++)\n" +
@@ -4437,11 +4664,12 @@ static class GamePatcher
         "        }\n" +
         "    }\n" +
         "    _tb_label += \"\\nPOWER: \" + tb_profile_names[tb_profile] + \" (TAP)\";\n" +
+        "    _tb_label += \"\\nDELAY FIX: \" + ((tb_lead > 0) ? (string(tb_lead) + \" MS\") : \"OFF\") + \" (TAP)\";\n" +
         "    if (tb_state == 3 && tb_ping_ms <= 0)\n" +
         "    {\n" +
         "        _tb_label += \"\\nSAFETY: SET MAX PING TIME IN INTIFACE\";\n" +
         "    }\n" +
-        "    var _tb_hit = point_in_rectangle(mouse_x, mouse_y, room_width - 124, 0, room_width, 44);\n" +
+        "    var _tb_hit = point_in_rectangle(mouse_x, mouse_y, room_width - 124, 0, room_width, 66);\n" +
         "    draw_text_color(room_width - 6, 6, _tb_label, 16777215, 16777215, 16777215, 16777215, 0.65 + (0.35 * _tb_hit));\n" +
         "    draw_set_halign(_tb_ha);\n" +
         "    draw_set_valign(_tb_va);\n" +

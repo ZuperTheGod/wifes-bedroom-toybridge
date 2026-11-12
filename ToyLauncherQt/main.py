@@ -306,6 +306,7 @@ class Settings:
     Profile: str = "default"
     CustomMin: float = 0.0
     CustomMax: float = 100.0
+    LeadMs: int = 0
     LaunchGame: bool = True
     IntifacePath: str | None = None
     GamePath: str | None = None
@@ -956,6 +957,24 @@ class MainWindow(QMainWindow):
         root.addWidget(self.custom_group)
         root.addSpacing(10)
 
+        # --- Toy delay compensation ---
+        lead_row = QHBoxLayout()
+        lead_row.addWidget(QLabel("Toy delay compensation:"))
+        self.lead_spin = QSpinBox()
+        self.lead_spin.setRange(0, 500)
+        self.lead_spin.setSingleStep(25)
+        self.lead_spin.setSuffix(" ms")
+        self.lead_spin.setSpecialValueText("Off")
+        self.lead_spin.setToolTip(
+            "If your toy runs a little behind the game (common over Bluetooth), raise this until it\n"
+            "lines up - usually 100-250 ms. The toy is then sent where the stroke will be that many\n"
+            "milliseconds from now. During pauses or while you drag by hand it follows the game as is.")
+        lead_row.addWidget(self.lead_spin)
+        lead_row.addWidget(QLabel("(raise it if the toy lags behind the game)"))
+        lead_row.addStretch(1)
+        root.addLayout(lead_row)
+        root.addSpacing(10)
+
         # --- Launch game checkbox ---
         self.launch_game_check = QCheckBox("Also launch the game")
         self.launch_game_check.setChecked(True)
@@ -1004,6 +1023,7 @@ class MainWindow(QMainWindow):
         self.profile_combo.setCurrentIndex(index)
         self.custom_min_spin.setValue(int(max(0, min(100, self._settings.CustomMin))))
         self.custom_max_spin.setValue(int(max(0, min(100, self._settings.CustomMax))))
+        self.lead_spin.setValue(int(max(0, min(500, self._settings.LeadMs))))
         self.launch_game_check.setChecked(self._settings.LaunchGame)
         self._update_custom_visibility()
 
@@ -1043,6 +1063,7 @@ class MainWindow(QMainWindow):
         self._settings.Profile = profile_key
         self._settings.CustomMin = self.custom_min_spin.value()
         self._settings.CustomMax = self.custom_max_spin.value()
+        self._settings.LeadMs = self.lead_spin.value()
         self._settings.LaunchGame = self.launch_game_check.isChecked()
         self._settings.save(self._settings_path)
 
@@ -1200,13 +1221,16 @@ class MainWindow(QMainWindow):
             kwargs: dict = {}
             if sys.platform == "win32":
                 kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+            bridge_args = [str(self._bridge_exe), "--profile", profile_key]
+            if self.lead_spin.value() > 0:
+                bridge_args += ["--lead-ms", str(self.lead_spin.value())]
             self._bridge_process = subprocess.Popen(
-                [str(self._bridge_exe), "--profile", profile_key],
+                bridge_args,
                 cwd=str(self._base_dir),
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
                 **kwargs,
             )
-            self.log(f"Started ButtplugBridge --profile {profile_key}")
+            self.log("Started " + " ".join(Path(a).name if i == 0 else a for i, a in enumerate(bridge_args)))
         except Exception as ex:
             self.log(f"Failed to start ButtplugBridge: {ex}")
             QMessageBox.critical(self, "Error", f"Failed to start ButtplugBridge:\n{ex}")

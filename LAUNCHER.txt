@@ -61,6 +61,9 @@ PLAY TAB
        Mid-Hard   - stronger half of the range (50-100%)
        Custom     - set your own Min%/Max% with the two boxes that appear
      (see PROFILES.txt if you want more detail on what these mean)
+     If your toy reacts a little late (common over Bluetooth), raise "Toy
+     delay compensation" below it - start around 150 ms; higher if the toy
+     is still behind, lower if it gets ahead. "Off" sends the game as is.
   6. Leave "Also launch the game" checked if you want one click to start
      everything, or uncheck it if you'll start the game yourself.
   7. Click Start. The launcher will:

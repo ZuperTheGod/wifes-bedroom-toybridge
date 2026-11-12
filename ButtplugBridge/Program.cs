@@ -6,6 +6,7 @@
 // and forwards it to whatever devices are connected via Intiface Central.
 //
 // Usage: ButtplugBridge.exe [--udp-port 45735] [--intiface ws://127.0.0.1:12345] [--profile <name>] [--list-profiles]
+//                           [--lead-ms <0-1000>]   (toy delay compensation, see LeadPredictor.cs)
 //
 // Intensity profiles: see profiles.json (created next to this exe on first run) and PROFILES.txt.
 
@@ -22,6 +23,7 @@ string intifaceUri = "ws://127.0.0.1:12345";
 bool verbose = false;
 string profileName = "default";
 bool listProfiles = false;
+double leadMs = 0;
 
 for (int i = 0; i < args.Length; i++)
 {
@@ -30,6 +32,7 @@ for (int i = 0; i < args.Length; i++)
     else if (args[i] == "--verbose") verbose = true;
     else if (args[i] == "--profile" && i + 1 < args.Length) profileName = args[++i];
     else if (args[i] == "--list-profiles") listProfiles = true;
+    else if (args[i] == "--lead-ms" && i + 1 < args.Length) leadMs = Math.Clamp(double.Parse(args[++i], CultureInfo.InvariantCulture), 0, 1000);
 }
 
 // ---- Tunables: adjust these to change how "thrust" feels on your toys ----
@@ -72,6 +75,9 @@ Console.WriteLine($"ButtplugBridge starting.");
 Console.WriteLine($"  Listening for game telemetry on udp://127.0.0.1:{udpPort}");
 Console.WriteLine($"  Connecting to Intiface Central at {intifaceUri}");
 Console.WriteLine($"  Profile: {profileName} ({activeProfile.Min:0.#}% - {activeProfile.Max:0.#}%) - from {profilesPath}");
+Console.WriteLine(leadMs > 0
+    ? $"  Toy delay compensation: toys are sent where the stroke will be {leadMs:0} ms from now."
+    : "  Toy delay compensation: off.");
 Console.WriteLine("  Press Ctrl+C to quit.");
 
 using var cts = new CancellationTokenSource();
@@ -82,7 +88,7 @@ Console.CancelKeyPress += (_, e) =>
 };
 
 var udpListenTask = ListenForTelemetryAsync(udpClient, telemetry, cts.Token);
-var buttplugTask = RunButtplugLoopAsync(intifaceUri, telemetry, cts.Token, verbose, activeProfile);
+var buttplugTask = RunButtplugLoopAsync(intifaceUri, telemetry, cts.Token, verbose, activeProfile, leadMs);
 
 await Task.WhenAll(udpListenTask, buttplugTask);
 Console.WriteLine("ButtplugBridge stopped.");
@@ -124,7 +130,7 @@ static async Task ListenForTelemetryAsync(UdpClient udp, TelemetryState state, C
     }
 }
 
-static async Task RunButtplugLoopAsync(string uri, TelemetryState state, CancellationToken token, bool verbose, ProfileRange profile)
+static async Task RunButtplugLoopAsync(string uri, TelemetryState state, CancellationToken token, bool verbose, ProfileRange profile, double leadMs)
 {
     double profileMin = profile.Min / 100.0;
     double profileMax = profile.Max / 100.0;
@@ -173,7 +179,7 @@ static async Task RunButtplugLoopAsync(string uri, TelemetryState state, Cancell
             }
         }
 
-        var snapshot = state.Snapshot();
+        var snapshot = state.Snapshot(leadMs);
         bool isFresh = (DateTime.UtcNow - snapshot.ReceivedAtUtc).TotalMilliseconds < TelemetryTimeoutMs;
 
         if (!isFresh)
@@ -184,6 +190,7 @@ static async Task RunButtplugLoopAsync(string uri, TelemetryState state, Cancell
                 haveLastSample = false;
                 smoothedVibe = 0;
                 await StopAllAsync(connectedDevices, token);
+                state.ResetPrediction();
                 Console.WriteLine("[bridge] no telemetry - toys stopped, waiting for scene...");
             }
         }
@@ -191,6 +198,8 @@ static async Task RunButtplugLoopAsync(string uri, TelemetryState state, Cancell
         {
             wasIdle = false;
 
+            // snapshot.Thrust is already moved ahead by leadMs when compensation is on, so the
+            // vibration and the stroke both lead by the same amount.
             double delta = haveLastSample ? Math.Abs(snapshot.Thrust - lastSampledThrust) : 0;
             lastSampledThrust = snapshot.Thrust;
             haveLastSample = true;
@@ -232,7 +241,7 @@ static async Task RunButtplugLoopAsync(string uri, TelemetryState state, Cancell
 
             if (verbose)
             {
-                Console.WriteLine($"[bridge] thrust={snapshot.Thrust:F3} delta={delta:F3} vibe={smoothedVibe:F3}->{outputVibe:F3} " +
+                Console.WriteLine($"[bridge] thrust={snapshot.Live:F3}->{snapshot.Thrust:F3} delta={delta:F3} vibe={smoothedVibe:F3}->{outputVibe:F3} " +
                                    $"stroke={strokePos:F3}->{outputStroke:F3}@{strokeDurationMs}ms insert={snapshot.Insert} orgasm={snapshot.Orgasm}");
             }
         }
@@ -294,6 +303,8 @@ class TelemetryState
     private double _thrust, _speed, _strength;
     private bool _insert, _orgasm;
     private DateTime _receivedAtUtc = DateTime.MinValue;
+    private readonly LeadPredictor _predictor = new();
+    private readonly System.Diagnostics.Stopwatch _clock = System.Diagnostics.Stopwatch.StartNew();
 
     public void Update(double thrust, double speed, double strength, bool insert, bool orgasm)
     {
@@ -305,14 +316,23 @@ class TelemetryState
             _insert = insert;
             _orgasm = orgasm;
             _receivedAtUtc = DateTime.UtcNow;
+            _predictor.Add(_clock.Elapsed.TotalMilliseconds, thrust, speed);
         }
     }
 
-    public (double Thrust, double Speed, double Strength, bool Insert, bool Orgasm, DateTime ReceivedAtUtc) Snapshot()
+    public void ResetPrediction()
+    {
+        lock (_lock) _predictor.Reset();
+    }
+
+    // Thrust: where the stroke is expected leadMs from now (the live value when leadMs is 0 or
+    // there is no steady swing); Live: the latest value the game sent.
+    public (double Thrust, double Live, double Speed, double Strength, bool Insert, bool Orgasm, DateTime ReceivedAtUtc) Snapshot(double leadMs)
     {
         lock (_lock)
         {
-            return (_thrust, _speed, _strength, _insert, _orgasm, _receivedAtUtc);
+            double thrust = leadMs > 0 ? _predictor.Predict(_clock.Elapsed.TotalMilliseconds, leadMs) : _thrust;
+            return (thrust, _thrust, _speed, _strength, _insert, _orgasm, _receivedAtUtc);
         }
     }
 }

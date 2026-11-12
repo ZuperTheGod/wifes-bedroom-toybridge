@@ -19,7 +19,7 @@ Full walkthrough of every tab (Play / Mods / Android) is in [`LAUNCHER.txt`](LAU
 
 - **Toy bridge** - streams real-time in-game intensity to your toy over buttplug.io while you
   play, with selectable intensity profiles (see [`PROFILES.txt`](PROFILES.txt),
-  [`TUNING.txt`](TUNING.txt)).
+  [`TUNING.txt`](TUNING.txt)) and a delay fix for toys that run behind over Bluetooth.
 - **Game patcher** - one-click patches a Wife's Bedroom/ModRoom-style `data.win` to broadcast
   that telemetry; nothing else about the game is changed.
 - **ModRoom character converter** - see below.

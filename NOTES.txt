@@ -2489,3 +2489,34 @@ publicly.
     area. DR 3.5.2: boots, 2 lovers + 8 wives and now "1 custom background(s) loaded" (bundled
     backgrounds were never found on Android before). Official 1.5 APK + the 1.4 mods folder:
     boots, "lovers 46, partners 47, bedrooms 9" = exactly what the folder holds.
+
+  2026-11-12: TOY DELAY FIX (Bluetooth lag)
+  - Player request: "adjust for latency over bluetooth, their toy is constantly behind a small
+    amount". Added "lead": the toy is sent where the stroke will be L ms from now.
+    PC: ButtplugBridge --lead-ms (ButtplugBridge/LeadPredictor.cs), launcher "Toy delay
+    compensation" (0-500 ms, setting LeadMs). Phone: --toy-direct, "DELAY FIX" line under POWER
+    on the title screen (tap: OFF/50/.../500, saved as "lead" in toy_direct.ini), same logic
+    ported line by line (GamePatcher ToyDirectLeadSample, tb_ld_*). Vibration follows the
+    predicted motion too.
+  - How: the game advances an angle by thrust_speed per frame, one stroke = 360 degrees. Strokes
+    start at each upward pass through the middle (interpolated - precise because the thrust is
+    fastest there); speed x 60 x time is added up since, plus speed x L, divided by the degrees
+    the last stroke took = where in the stroke L from now; looked up in the last stroke's
+    recorded shape. Off (live value) unless the last stroke matched the speed within -15/+18%,
+    the next pass isn't overdue, the thrust is moving, and the last two samples fit the shape.
+  - Two designs failed first, measured: replaying the last stroke by TIME (lags every speed
+    change - the game eases into a new speed in ~2 s; worse than nothing) and a cosine model
+    (sent values ~40 ms early). The real stroke snaps end to end in ~80 ms and then eases in;
+    in normal play a stroke took 360 degrees within 1-2%; the bad stretches are the game's own
+    skipped/shallow strokes and pauses, where it falls back to live.
+  - Measured, real game (DeepRoom 4.0, emulator, toy client logging the thrust it saw and the
+    value it sent to a stand-in server): lead 200 -> error vs where the thrust really was
+    200 ms later 0.484 -> 0.274 (RMS, 0..1), sent values line up 180 ms ahead. The PC predictor
+    fed the same samples gives the same values (1176/1176 within 0.0002). PC bridge end to end
+    (real recording replayed as UDP telemetry, a Buttplug v4 stand-in server - fake_v4.py in
+    the session scratchpad, the repo's fake_intiface.py only speaks v3): it connected, sent
+    1522 commands, output lines up ~186 ms ahead of the live input. Simulated game motion
+    (speed changes, rhythm drift, pauses, drags): normal play 0.30 -> 0.09 at 150 ms.
+  - Side finding: the bridge's 30 Hz loop actually runs every ~47 ms on Windows (Task.Delay
+    granularity). Not changed.
+  - Not verified: a real Bluetooth toy, a real phone, what lead value suits which toy.

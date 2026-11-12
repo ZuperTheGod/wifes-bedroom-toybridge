@@ -286,7 +286,26 @@ Then on the phone you only need the game and Intiface Central:
      is what makes Intiface stop the toy by itself. The game's title screen
      shows "SAFETY: SET MAX PING TIME IN INTIFACE" while it is off.
   3. Open the game. Top right of the title screen shows "TOY: <your toy>" once
-     connected. Tap that corner to change POWER (start with EASY 0-30).
+     connected. Tap that corner to change POWER (start with EASY 0-30). Tap
+     "DELAY FIX" just below it if the toy runs behind the game (see the next
+     section).
+
+TOY RUNNING BEHIND THE GAME? (DELAY FIX)
+--------------------------------------------------------------------------
+Toys connected over Bluetooth usually react a little late - often 100-300 ms
+- so the toy can feel a beat behind what you see. The delay fix sends the toy
+where the stroke is GOING to be instead of where it is now, by that many
+milliseconds. The game's stroke repeats, so the next moment can be worked
+out from the game's own speed and the shape of the last stroke.
+  - Phone (built-in toy support): tap "DELAY FIX" on the title screen, under
+    POWER. Each tap goes up a step: OFF, 50, 100, 150, 200, 250, 300, 400,
+    500 ms, then back to OFF. The game remembers it.
+  - PC: "Toy delay compensation" in the launcher, next to the intensity
+    profile (or ButtplugBridge --lead-ms 200).
+Start around 150 and change it until the toy lines up with the screen: still
+behind = higher, ahead = lower. During pauses, while you drag by hand, and
+for the first couple of strokes of a scene the toy simply follows the game as
+it is (those moments can't be predicted).
 
 Status: tested on an Android emulator against a stand-in server only. Not yet
 confirmed against the real Intiface Central or with a real toy moving.
